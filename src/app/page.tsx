@@ -11,26 +11,54 @@ export default function Home() {
   const [selectedClient, setSelectedClient] = useState<{ id: string, name: string } | null>(null);
   const [reportType, setReportType] = useState<'visit' | 'phone' | 'email' | null>(null);
   const [content, setContent] = useState('');
+  const [reporterName, setReporterName] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // Load saved name from localStorage on mount
+  useState(() => {
+    if (typeof window !== 'undefined') {
+      const savedName = localStorage.getItem('reporter_name');
+      if (savedName) setReporterName(savedName);
+    }
+  });
+
   const handleSubmit = async () => {
-    if (!selectedClient || !reportType || !content) {
-      alert('고객사, 활동 종류, 내용을 모두 입력해주세요.');
+    if (!selectedClient || !reportType || !content || !reporterName.trim()) {
+      alert('고객사, 활동 종류, 내용, 작성자 이름을 모두 입력해주세요.');
       return;
     }
 
     setIsSubmitting(true);
     try {
-      // For MVP, we use a fixed user ID if not logged in, 
-      // but ideally we should have a user session.
-      // Let's assume there's a test user profile in the DB.
-      // For this demo, we'll try to get the current user or use a placeholder if none.
-      const { data: { user } } = await supabase.auth.getUser();
+      // Save name to localStorage for next time
+      localStorage.setItem('reporter_name', reporterName.trim());
 
+      // 1. Handle Profile (Check if profile with this name exists, or create one)
+      let userId = '00000000-0000-0000-0000-000000000000'; // Default fallback
+
+      const { data: existingProfile } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('name', reporterName.trim())
+        .single();
+
+      if (existingProfile) {
+        userId = existingProfile.id;
+      } else {
+        // Create new profile for this new name
+        const newId = crypto.randomUUID();
+        const { error: profileError } = await supabase
+          .from('profiles')
+          .insert([{ id: newId, name: reporterName.trim() }]);
+
+        if (!profileError) userId = newId;
+      }
+
+      // 2. Insert Report
       const { error } = await supabase
         .from('reports')
         .insert([{
-          user_id: user?.id || '00000000-0000-0000-0000-000000000000', // Update this after auth setup
+          user_id: userId,
           client_id: selectedClient.id,
           type: reportType,
           content: content
@@ -39,7 +67,7 @@ export default function Home() {
       if (error) throw error;
 
       alert('보고서가 제출되었습니다.');
-      // Reset form
+      // Reset form (keep reporterName)
       setSelectedClient(null);
       setReportType(null);
       setContent('');
@@ -49,6 +77,7 @@ export default function Home() {
       setIsSubmitting(false);
     }
   };
+
 
   const types = [
     { id: 'visit', label: '방문', icon: MapPin, color: 'bg-blue-100 text-blue-600 border-blue-200' },
@@ -104,6 +133,17 @@ export default function Home() {
           placeholder="상담 결과, 특이사항 등을 기록하세요..."
           rows={4}
           className="w-full p-4 rounded-2xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 focus:outline-none focus:ring-2 focus:ring-primary shadow-sm resize-none"
+        />
+      </section>
+
+      <section className="space-y-3">
+        <label className="text-sm font-semibold text-gray-700 dark:text-gray-300">4. 작성자 이름</label>
+        <input
+          type="text"
+          value={reporterName}
+          onChange={(e) => setReporterName(e.target.value)}
+          placeholder="본인 이름을 입력하세요 (자동 저장됨)"
+          className="w-full p-4 rounded-2xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 focus:outline-none focus:ring-2 focus:ring-primary shadow-sm"
         />
       </section>
 
