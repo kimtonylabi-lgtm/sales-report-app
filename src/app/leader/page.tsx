@@ -4,13 +4,14 @@ import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { format, differenceInDays } from 'date-fns';
 import { ko } from 'date-fns/locale';
-import { AlertCircle, TrendingUp, Users, Calendar } from 'lucide-react';
+import { AlertCircle, TrendingUp, Users, Calendar, Download } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 export default function LeaderDashboard() {
     const [stats, setStats] = useState({ today: 0, total: 0 });
     const [dormantClients, setDormantClients] = useState<any[]>([]);
     const [loading, setLoading] = useState(true);
+    const [isExporting, setIsExporting] = useState(false);
 
     useEffect(() => {
         loadDashboard();
@@ -48,11 +49,72 @@ export default function LeaderDashboard() {
         setLoading(false);
     };
 
+    const handleExport = async () => {
+        setIsExporting(true);
+        try {
+            const { data: reports, error } = await supabase
+                .from('reports')
+                .select(`
+                    created_at,
+                    type,
+                    content,
+                    clients (name),
+                    profiles (name)
+                `)
+                .order('created_at', { ascending: false });
+
+            if (error) throw error;
+
+            if (!reports || reports.length === 0) {
+                alert('다운로드할 데이터가 없습니다.');
+                return;
+            }
+
+            // CSV Creation
+            const headers = ['날짜', '작성자', '고객사', '활동종류', '보고내용'];
+            const rows = reports.map(r => [
+                format(new Date(r.created_at), 'yyyy-MM-dd HH:mm'),
+                (r.profiles as any)?.name || '알수없음',
+                (r.clients as any)?.name || '알수없음',
+                r.type === 'visit' ? '방문' : r.type === 'phone' ? '전화' : '메일',
+                `"${r.content.replace(/"/g, '""')}"` // Escape quotes for CSV
+            ]);
+
+            const csvContent = [
+                '\uFEFF' + headers.join(','), // BOM for Korean characters
+                ...rows.map(row => row.join(','))
+            ].join('\n');
+
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.setAttribute('href', url);
+            link.setAttribute('download', `영업보고현황_${format(new Date(), 'yyyyMMdd')}.csv`);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        } catch (error: any) {
+            alert('다운로드 중 오류가 발생했습니다: ' + error.message);
+        } finally {
+            setIsExporting(false);
+        }
+    };
+
     return (
         <div className="space-y-8 pb-20">
-            <header>
-                <h1 className="text-2xl font-bold">관리자 대시보드</h1>
-                <p className="text-gray-500">팀 활동 현황 및 휴면 고객 관리</p>
+            <header className="flex justify-between items-start">
+                <div>
+                    <h1 className="text-2xl font-bold">관리자 대시보드</h1>
+                    <p className="text-gray-500">팀 활동 현황 및 휴면 고객 관리</p>
+                </div>
+                <button
+                    onClick={handleExport}
+                    disabled={isExporting}
+                    className="flex items-center space-x-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 px-4 py-2 rounded-xl text-sm font-bold text-gray-700 dark:text-gray-200 shadow-sm active:scale-95 transition-all disabled:opacity-50"
+                >
+                    <Download size={18} />
+                    <span>{isExporting ? '받는 중...' : '엑셀 다운로드'}</span>
+                </button>
             </header>
 
             {/* Stats Cards */}
@@ -115,3 +177,4 @@ export default function LeaderDashboard() {
         </div>
     );
 }
+
