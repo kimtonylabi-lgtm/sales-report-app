@@ -61,12 +61,7 @@ AFTER INSERT ON public.reports
 FOR EACH ROW
 EXECUTE FUNCTION update_client_last_visited();
 
--- 샘플 데이터 (선택 사항)
--- 테스트용 프로필 생성 (auth.users 가 없어도 public.profiles 만으로 MVP 동작 확인 가능하도록)
--- 실제 운영시에는 auth.users 연동 필요
-INSERT INTO public.profiles (id, name, role) 
-VALUES ('00000000-0000-0000-0000-000000000000', '홍길동 과장', 'sales')
-ON CONFLICT (id) DO NOTHING;
+-- 샘플 데이터가 필요하다면 아래 주석을 해제하거나 직접 입력하세요.
+-- INSERT INTO public.profiles (id, name, role) VALUES ('00000000-0000-0000-0000-000000000000', '홍길동 과장', 'sales');
+-- INSERT INTO public.clients (name) VALUES ('삼성전자'), ('LG전자'), ('현대자동차');
 
-INSERT INTO public.clients (name) VALUES ('삼성전자'), ('LG전자'), ('현대자동차')
-ON CONFLICT (name) DO NOTHING;
