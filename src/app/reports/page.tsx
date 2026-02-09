@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { format } from 'date-fns';
 import { ko } from 'date-fns/locale';
-import { MapPin, Phone, Mail, FileText, Pencil, X, Send } from 'lucide-react';
+import { MapPin, Phone, Mail, FileText, Pencil, X, Send, Trash2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -13,6 +13,7 @@ export default function MyReportsPage() {
     const [loading, setLoading] = useState(true);
     const [editingReport, setEditingReport] = useState<any>(null);
     const [isUpdating, setIsUpdating] = useState(false);
+    const [isDeleting, setIsDeleting] = useState(false);
 
     useEffect(() => {
         loadMyReports();
@@ -52,6 +53,29 @@ export default function MyReportsPage() {
             alert('수정 실패: ' + error.message);
         } finally {
             setIsUpdating(false);
+        }
+    };
+
+    const handleDelete = async () => {
+        if (!editingReport) return;
+        if (!confirm('정말 이 보고서를 삭제하시겠습니까?')) return;
+
+        setIsDeleting(true);
+        try {
+            const { error } = await supabase
+                .from('reports')
+                .delete()
+                .eq('id', editingReport.id);
+
+            if (error) throw error;
+
+            alert('보고서가 삭제되었습니다.');
+            setEditingReport(null);
+            loadMyReports();
+        } catch (error: any) {
+            alert('삭제 실패: ' + error.message);
+        } finally {
+            setIsDeleting(false);
         }
     };
 
@@ -117,9 +141,18 @@ export default function MyReportsPage() {
                         >
                             <div className="flex justify-between items-center">
                                 <h2 className="text-xl font-bold">보고서 수정</h2>
-                                <button onClick={() => setEditingReport(null)} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full transition-colors">
-                                    <X size={20} />
-                                </button>
+                                <div className="flex items-center space-x-2">
+                                    <button
+                                        onClick={handleDelete}
+                                        disabled={isDeleting || isUpdating}
+                                        className="p-2 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-full transition-colors disabled:opacity-50"
+                                    >
+                                        <Trash2 size={20} />
+                                    </button>
+                                    <button onClick={() => setEditingReport(null)} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full transition-colors">
+                                        <X size={20} />
+                                    </button>
+                                </div>
                             </div>
 
                             <div className="space-y-4">
@@ -163,7 +196,7 @@ export default function MyReportsPage() {
 
                             <button
                                 onClick={handleUpdate}
-                                disabled={isUpdating}
+                                disabled={isUpdating || isDeleting}
                                 className="w-full bg-primary text-white py-4 rounded-2xl font-bold flex items-center justify-center space-x-2 shadow-lg shadow-primary/20 active:scale-95 transition-all disabled:opacity-50"
                             >
                                 {isUpdating ? (
@@ -182,4 +215,5 @@ export default function MyReportsPage() {
         </div>
     );
 }
+
 
