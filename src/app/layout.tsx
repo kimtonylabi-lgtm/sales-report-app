@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
 import { BottomNav } from "@/components/BottomNav";
+import { AuthProvider } from "@/components/AuthProvider";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -30,10 +31,12 @@ export default function RootLayout({
   return (
     <html lang="ko" className="h-full">
       <body className={`${inter.className} antialiased bg-background text-foreground h-full overflow-x-hidden pb-20`}>
-        <main className="max-w-md mx-auto min-h-screen relative px-4 pt-6">
-          {children}
-        </main>
-        <BottomNav />
+        <AuthProvider>
+          <main className="max-w-md mx-auto min-h-screen relative px-4 pt-6">
+            {children}
+          </main>
+          <BottomNav />
+        </AuthProvider>
       </body>
     </html>
   );

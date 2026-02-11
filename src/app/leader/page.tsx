@@ -2,20 +2,27 @@
 
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
-import { format, differenceInDays } from 'date-fns';
+import { format, subDays, startOfDay } from 'date-fns';
 import { ko } from 'date-fns/locale';
-import { AlertCircle, TrendingUp, Users, Calendar, Download } from 'lucide-react';
+import { AlertCircle, TrendingUp, Users, Calendar, Download, Lock, BarChart3 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useAuth } from '@/components/AuthProvider';
 
 export default function LeaderDashboard() {
+    const { profile, loading: authLoading } = useAuth();
     const [stats, setStats] = useState({ today: 0, total: 0 });
     const [dormantClients, setDormantClients] = useState<any[]>([]);
+    const [weeklyStats, setWeeklyStats] = useState<{ date: string, count: number, label: string }[]>([]);
     const [loading, setLoading] = useState(true);
     const [isExporting, setIsExporting] = useState(false);
 
     useEffect(() => {
-        loadDashboard();
-    }, []);
+        if (!authLoading && profile?.role === 'leader') {
+            loadDashboard();
+        } else if (!authLoading) {
+            setLoading(false);
+        }
+    }, [profile, authLoading]);
 
     const loadDashboard = async () => {
         setLoading(true);
@@ -44,8 +51,30 @@ export default function LeaderDashboard() {
             .or(`last_visited_at.lt.${fourteenDaysAgo.toISOString()},last_visited_at.is.null`)
             .order('last_visited_at', { ascending: true });
 
+        // 4. Get Weekly Stats (Last 7 days)
+        const weekStart = subDays(startOfDay(new Date()), 6);
+        const { data: weekReports } = await supabase
+            .from('reports')
+            .select('created_at')
+            .gte('created_at', weekStart.toISOString());
+
+        const dayStats = Array.from({ length: 7 }).map((_, i) => {
+            const date = subDays(today, 6 - i);
+            const dateStr = format(date, 'yyyy-MM-dd');
+            const dayReports = weekReports?.filter(r =>
+                format(new Date(r.created_at), 'yyyy-MM-dd') === dateStr
+            ).length || 0;
+
+            return {
+                date: dateStr,
+                count: dayReports,
+                label: format(date, 'E', { locale: ko }) // Mon, Tue, etc. in Korean
+            };
+        });
+
         setStats({ today: todayCount || 0, total: totalCount || 0 });
         setDormantClients(clients || []);
+        setWeeklyStats(dayStats);
         setLoading(false);
     };
 
@@ -100,6 +129,34 @@ export default function LeaderDashboard() {
         }
     };
 
+    if (authLoading) return (
+        <div className="min-h-screen flex items-center justify-center">
+            <div className="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full" />
+        </div>
+    );
+
+    if (profile?.role !== 'leader') {
+        return (
+            <div className="min-h-[70vh] flex flex-col items-center justify-center text-center space-y-4 px-6 animate-in fade-in duration-500">
+                <div className="w-20 h-20 bg-red-50 dark:bg-red-900/20 text-red-500 rounded-3xl flex items-center justify-center mb-4">
+                    <Lock size={40} />
+                </div>
+                <h1 className="text-2xl font-bold">접근 권한 없음</h1>
+                <p className="text-gray-500">이 페이지는 팀장 전용 페이지입니다.<br />권한이 필요하시면 관리자에게 문의하세요.</p>
+                <div className="pt-4">
+                    <button
+                        onClick={() => window.location.href = '/'}
+                        className="bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-200 px-6 py-3 rounded-2xl font-bold active:scale-95 transition-all text-sm"
+                    >
+                        홈으로 돌아가기
+                    </button>
+                </div>
+            </div>
+        );
+    }
+
+    const maxCount = Math.max(...weeklyStats.map(s => s.count), 5); // Minimum scale of 5
+
     return (
         <div className="space-y-8 pb-20">
             <header className="flex justify-between items-start">
@@ -119,17 +176,52 @@ export default function LeaderDashboard() {
 
             {/* Stats Cards */}
             <div className="grid grid-cols-2 gap-4">
-                <div className="bg-gradient-to-br from-blue-500 to-blue-600 p-5 rounded-3xl text-white shadow-lg shadow-blue-200 dark:shadow-none">
-                    <TrendingUp className="mb-3 opacity-80" size={24} />
-                    <div className="text-3xl font-black">{stats.today}</div>
-                    <div className="text-xs font-medium opacity-80">오늘 제출 보고</div>
+                <div className="bg-gradient-to-br from-blue-500 to-blue-600 p-5 rounded-3xl text-white shadow-lg shadow-blue-200 dark:shadow-none relative overflow-hidden group">
+                    <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:scale-110 transition-transform">
+                        <TrendingUp size={80} />
+                    </div>
+                    <div className="relative z-10">
+                        <TrendingUp className="mb-3 opacity-80" size={24} />
+                        <div className="text-3xl font-black">{stats.today}</div>
+                        <div className="text-xs font-medium opacity-80">오늘 제출 보고</div>
+                    </div>
                 </div>
-                <div className="bg-white dark:bg-gray-800 p-5 rounded-3xl shadow-sm border border-gray-100 dark:border-gray-700">
-                    <Users className="mb-3 text-primary" size={24} />
-                    <div className="text-3xl font-black text-gray-800 dark:text-gray-100">{stats.total}</div>
-                    <div className="text-xs font-medium text-gray-500">누적 활동 기록</div>
+                <div className="bg-white dark:bg-gray-800 p-5 rounded-3xl shadow-sm border border-gray-100 dark:border-gray-700 relative overflow-hidden group">
+                    <div className="absolute top-0 right-0 p-4 opacity-5 text-primary group-hover:scale-110 transition-transform">
+                        <Users size={80} />
+                    </div>
+                    <div className="relative z-10">
+                        <Users className="mb-3 text-primary" size={24} />
+                        <div className="text-3xl font-black text-gray-800 dark:text-gray-100">{stats.total}</div>
+                        <div className="text-xs font-medium text-gray-500">누적 활동 기록</div>
+                    </div>
                 </div>
             </div>
+
+            {/* Weekly Chart */}
+            <section className="bg-white dark:bg-gray-800 p-6 rounded-3xl shadow-sm border border-gray-100 dark:border-gray-700">
+                <div className="flex items-center mb-6">
+                    <BarChart3 size={20} className="mr-2 text-primary" />
+                    <h2 className="text-lg font-bold">주간 활동 추이</h2>
+                </div>
+                <div className="flex items-end justify-between h-40 space-x-3">
+                    {weeklyStats.map((stat, idx) => (
+                        <div key={idx} className="flex flex-col items-center flex-1 group">
+                            <div className="relative w-full flex items-end justify-center h-32 bg-gray-50 dark:bg-gray-900 rounded-t-xl overflow-hidden">
+                                <div
+                                    className="w-full bg-primary/80 group-hover:bg-primary transition-all duration-500 rounded-t-lg mx-1"
+                                    style={{ height: `${(stat.count / maxCount) * 100}%` }}
+                                >
+                                    <div className="opacity-0 group-hover:opacity-100 absolute -top-8 left-1/2 -translate-x-1/2 bg-gray-900 text-white text-[10px] px-2 py-1 rounded transition-opacity whitespace-nowrap z-10">
+                                        {stat.count}건
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="text-[10px] text-gray-400 mt-2 font-medium">{stat.label}</div>
+                        </div>
+                    ))}
+                </div>
+            </section>
 
             {/* Dormant Clients Section */}
             <section className="space-y-4">
@@ -177,4 +269,3 @@ export default function LeaderDashboard() {
         </div>
     );
 }
-
