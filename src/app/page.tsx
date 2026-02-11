@@ -80,9 +80,9 @@ export default function Home() {
 
     setIsPasswordUpdating(true);
     try {
-      // 10초 타임아웃 추가
+      // 3초 타임아웃으로 변경
       const timeoutPromise = new Promise((_, reject) => {
-        setTimeout(() => reject(new Error('요청 시간이 초과되었습니다. 다시 시도해주세요.')), 10000);
+        setTimeout(() => reject(new Error('네트워크 응답이 지연되고 있습니다. 잠시 후 다시 시도해주세요.')), 3000);
       });
 
       await Promise.race([
@@ -90,15 +90,21 @@ export default function Home() {
         timeoutPromise
       ]);
 
-      alert('비밀번호가 성공적으로 변경되었습니다.');
-      setIsChangingPassword(false);
-      setNewPassword('');
-      setConfirmPassword('');
+      alert('비밀번호가 성공적으로 변경되었습니다. 보안을 위해 다시 로그인해 주세요.');
+
+      // 세션 정리 및 상태 초기화를 위해 새로고침
+      window.location.reload();
+
     } catch (err: any) {
       console.error('Password update error:', err);
-      alert('비밀번호 변경 실패: ' + (err.message || '알 수 없는 오류가 발생했습니다.'));
-    } finally {
+      // 에러 메시지가 타임아웃인지 확인
+      const msg = err.message || '알 수 없는 오류가 발생했습니다.';
+      alert('비밀번호 변경 실패: ' + msg);
+
+      // 상태 초기화
       setIsPasswordUpdating(false);
+    } finally {
+      if (isPasswordUpdating) setIsPasswordUpdating(false);
     }
   };
 
