@@ -108,6 +108,11 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     };
 
     const updatePassword = async (newPassword: string) => {
+        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+        if (sessionError || !session) {
+            throw new Error('로그인 세션이 만료되었습니다. 다시 로그인해주세요.');
+        }
+
         const { error } = await supabase.auth.updateUser({
             password: newPassword
         });

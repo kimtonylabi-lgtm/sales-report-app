@@ -80,13 +80,23 @@ export default function Home() {
 
     setIsPasswordUpdating(true);
     try {
-      await updatePassword(newPassword);
+      // 10초 타임아웃 추가
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('요청 시간이 초과되었습니다. 다시 시도해주세요.')), 10000);
+      });
+
+      await Promise.race([
+        updatePassword(newPassword),
+        timeoutPromise
+      ]);
+
       alert('비밀번호가 성공적으로 변경되었습니다.');
       setIsChangingPassword(false);
       setNewPassword('');
       setConfirmPassword('');
     } catch (err: any) {
-      alert('비밀번호 변경 실패: ' + err.message);
+      console.error('Password update error:', err);
+      alert('비밀번호 변경 실패: ' + (err.message || '알 수 없는 오류가 발생했습니다.'));
     } finally {
       setIsPasswordUpdating(false);
     }
