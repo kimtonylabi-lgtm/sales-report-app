@@ -33,21 +33,65 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     const router = useRouter();
     const pathname = usePathname();
 
-    useEffect(() => {
-        const setData = async () => {
-            setLoading(true);
-            const { data: { session } } = await supabase.auth.getSession();
-            setSession(session);
-            setUser(session?.user ?? null);
-            if (session?.user) {
-                await fetchProfile(session.user.id);
+    const fetchProfile = async (userId: string) => {
+        try {
+            // 3초 타임아웃
+            const timeoutPromise = new Promise((_, reject) =>
+                setTimeout(() => reject(new Error('Profile fetch timeout')), 3000)
+            );
+
+            const profilePromise = supabase
+                .from('profiles')
+                .select('*')
+                .eq('id', userId)
+                .single();
+
+            const { data, error } = await Promise.race([profilePromise, timeoutPromise]) as any;
+
+            if (data) {
+                setProfile(data);
             }
-            setLoading(false);
+        } catch (error) {
+            console.error('Error fetching profile:', error);
+        }
+    };
+
+    useEffect(() => {
+        let mounted = true;
+
+        const setData = async () => {
+            try {
+                // 5초 타임아웃 추가
+                const timeoutPromise = new Promise((_, reject) =>
+                    setTimeout(() => reject(new Error('Session load timeout')), 5000)
+                );
+
+                const sessionPromise = supabase.auth.getSession();
+
+                const { data: { session } } = await Promise.race([
+                    sessionPromise,
+                    timeoutPromise
+                ]) as any;
+
+                if (mounted) {
+                    setSession(session);
+                    setUser(session?.user ?? null);
+                    if (session?.user) {
+                        await fetchProfile(session.user.id);
+                    }
+                }
+            } catch (error) {
+                console.error('Error checking session:', error);
+            } finally {
+                if (mounted) setLoading(false);
+            }
         };
 
         setData();
 
         const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+            if (!mounted) return;
+
             setSession(session);
             setUser(session?.user ?? null);
 
@@ -68,27 +112,18 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
             }
         });
 
-        return () => subscription.unsubscribe();
+        return () => {
+            mounted = false;
+            subscription.unsubscribe();
+        };
     }, [router]);
 
-    const fetchProfile = async (userId: string) => {
-        try {
-            const { data, error } = await supabase
-                .from('profiles')
-                .select('*')
-                .eq('id', userId)
-                .single();
-
-            if (data) {
-                setProfile(data);
-            }
-        } catch (error) {
-            console.error('Error fetching profile:', error);
-        }
-    };
-
     const signOut = async () => {
-        await supabase.auth.signOut();
+        try {
+            await supabase.auth.signOut();
+        } catch (e) {
+            console.error(e);
+        }
         window.location.href = '/login';
     };
 
