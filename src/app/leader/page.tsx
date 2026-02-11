@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
-import { format, subDays, startOfDay } from 'date-fns';
+import { format, subDays, startOfDay, differenceInDays } from 'date-fns';
 import { ko } from 'date-fns/locale';
 import { AlertCircle, TrendingUp, Users, Calendar, Download, Lock, BarChart3 } from 'lucide-react';
 import { cn } from '@/lib/utils';
