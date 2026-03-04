@@ -5,7 +5,7 @@ import { supabase } from '@/lib/supabase';
 import { ClientSearch } from '@/components/ClientSearch';
 import { format } from 'date-fns';
 import { ko } from 'date-fns/locale';
-import { MapPin, Phone, Mail, Clock, ChevronDown, Check, User } from 'lucide-react';
+import { MapPin, Phone, Mail, Clock, ChevronDown, Check, User, Users, Video } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/components/AuthProvider';
 import { motion } from 'framer-motion';
@@ -83,6 +83,8 @@ export default function HistoryPage() {
             case 'visit': return MapPin;
             case 'phone': return Phone;
             case 'email': return Mail;
+            case 'offline_meeting': return Users;
+            case 'video_meeting': return Video;
             default: return Clock;
         }
     };
@@ -92,6 +94,8 @@ export default function HistoryPage() {
             case 'visit': return 'bg-blue-500 shadow-blue-200';
             case 'phone': return 'bg-green-500 shadow-green-200';
             case 'email': return 'bg-purple-500 shadow-purple-200';
+            case 'offline_meeting': return 'bg-orange-500 shadow-orange-200';
+            case 'video_meeting': return 'bg-teal-500 shadow-teal-200';
             default: return 'bg-gray-500 shadow-gray-200';
         }
     };
@@ -162,9 +166,11 @@ export default function HistoryPage() {
                                                     "text-xs font-bold uppercase tracking-wider px-2 py-0.5 rounded-md",
                                                     report.type === 'visit' ? "bg-blue-50 text-blue-500" :
                                                         report.type === 'phone' ? "bg-green-50 text-green-500" :
-                                                            "bg-purple-50 text-purple-500"
+                                                            report.type === 'offline_meeting' ? "bg-orange-50 text-orange-500" :
+                                                                report.type === 'video_meeting' ? "bg-teal-50 text-teal-500" :
+                                                                    "bg-purple-50 text-purple-500"
                                                 )}>
-                                                    {report.type === 'visit' ? '방문' : report.type === 'phone' ? '전화' : '메일'}
+                                                    {report.type === 'visit' ? '방문' : report.type === 'phone' ? '전화' : report.type === 'offline_meeting' ? '오프라인 미팅' : report.type === 'video_meeting' ? '화상미팅' : '메일'}
                                                 </span>
                                                 <span className="text-xs font-bold text-gray-400">
                                                     {format(new Date(report.created_at), 'yyyy.MM.dd HH:mm', { locale: ko })}
@@ -221,9 +227,11 @@ export default function HistoryPage() {
                                                         "text-[10px] font-bold uppercase tracking-wider w-fit px-2 py-0.5 rounded-md",
                                                         report.type === 'visit' ? "bg-blue-50 text-blue-500" :
                                                             report.type === 'phone' ? "bg-green-50 text-green-500" :
-                                                                "bg-purple-50 text-purple-500"
+                                                                report.type === 'offline_meeting' ? "bg-orange-50 text-orange-500" :
+                                                                    report.type === 'video_meeting' ? "bg-teal-50 text-teal-500" :
+                                                                        "bg-purple-50 text-purple-500"
                                                     )}>
-                                                        {report.type === 'visit' ? '방문' : report.type === 'phone' ? '전화' : '메일'}
+                                                        {report.type === 'visit' ? '방문' : report.type === 'phone' ? '전화' : report.type === 'offline_meeting' ? '오프라인 미팅' : report.type === 'video_meeting' ? '화상미팅' : '메일'}
                                                     </span>
                                                 </div>
                                                 <span className="text-xs font-bold text-gray-400">

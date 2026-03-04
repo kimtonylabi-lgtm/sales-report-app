@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { ClientSearch } from '@/components/ClientSearch';
-import { MapPin, Phone, Mail, Send, LogOut, User as UserIcon, Check, X, Key, ShieldCheck, Sparkles } from 'lucide-react';
+import { MapPin, Phone, Mail, Send, LogOut, User as UserIcon, Check, X, Key, ShieldCheck, Sparkles, Users, Video } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { supabase } from '@/lib/supabase';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -11,7 +11,7 @@ import { useAuth } from '@/components/AuthProvider';
 export default function Home() {
   const { user, profile, loading, signOut, updateProfile, updatePassword } = useAuth();
   const [selectedClient, setSelectedClient] = useState<{ id: string, name: string } | null>(null);
-  const [reportType, setReportType] = useState<'visit' | 'phone' | 'email' | null>(null);
+  const [reportType, setReportType] = useState<'visit' | 'phone' | 'email' | 'offline_meeting' | 'video_meeting' | null>(null);
   const [content, setContent] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isEditingName, setIsEditingName] = useState(false);
@@ -113,6 +113,8 @@ export default function Home() {
     { id: 'visit', label: '방문', icon: MapPin, color: 'bg-blue-500 text-white shadow-blue-200' },
     { id: 'phone', label: '전화', icon: Phone, color: 'bg-green-500 text-white shadow-green-200' },
     { id: 'email', label: '메일', icon: Mail, color: 'bg-purple-500 text-white shadow-purple-200' },
+    { id: 'offline_meeting', label: '오프라인 미팅', icon: Users, color: 'bg-orange-500 text-white shadow-orange-200' },
+    { id: 'video_meeting', label: '화상미팅', icon: Video, color: 'bg-teal-500 text-white shadow-teal-200' },
   ];
 
   if (loading) return (

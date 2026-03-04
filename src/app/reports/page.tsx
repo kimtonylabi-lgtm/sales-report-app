@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { format } from 'date-fns';
 import { ko } from 'date-fns/locale';
-import { MapPin, Phone, Mail, FileText, Pencil, X, Send, Trash2, ChevronDown } from 'lucide-react';
+import { MapPin, Phone, Mail, FileText, Pencil, X, Send, Trash2, ChevronDown, Users, Video } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '@/components/AuthProvider';
@@ -181,17 +181,21 @@ export default function MyReportsPage() {
                                         "p-3 rounded-2xl",
                                         report.type === 'visit' ? "bg-blue-50 text-blue-500" :
                                             report.type === 'phone' ? "bg-green-50 text-green-500" :
-                                                "bg-purple-50 text-purple-500"
+                                                report.type === 'offline_meeting' ? "bg-orange-50 text-orange-500" :
+                                                    report.type === 'video_meeting' ? "bg-teal-50 text-teal-500" :
+                                                        "bg-purple-50 text-purple-500"
                                     )}>
                                         {report.type === 'visit' && <MapPin size={20} />}
                                         {report.type === 'phone' && <Phone size={20} />}
                                         {report.type === 'email' && <Mail size={20} />}
+                                        {report.type === 'offline_meeting' && <Users size={20} />}
+                                        {report.type === 'video_meeting' && <Video size={20} />}
                                     </div>
                                     <div>
                                         <h3 className="font-bold text-lg text-gray-900 dark:text-gray-100">{report.clients?.name}</h3>
                                         <div className="flex items-center space-x-2 text-xs font-medium text-gray-400 mt-0.5">
                                             <span>
-                                                {report.type === 'visit' ? '방문' : report.type === 'phone' ? '전화' : '메일'}
+                                                {report.type === 'visit' ? '방문' : report.type === 'phone' ? '전화' : report.type === 'offline_meeting' ? '오프라인 미팅' : report.type === 'video_meeting' ? '화상미팅' : '메일'}
                                             </span>
                                             <span className="w-1 h-1 bg-gray-300 rounded-full" />
                                             <span>{format(new Date(report.created_at), 'MM/dd HH:mm', { locale: ko })}</span>
@@ -251,6 +255,8 @@ export default function MyReportsPage() {
                                             { id: 'visit', label: '방문', icon: MapPin },
                                             { id: 'phone', label: '전화', icon: Phone },
                                             { id: 'email', label: '메일', icon: Mail },
+                                            { id: 'offline_meeting', label: '오프라인 미팅', icon: Users },
+                                            { id: 'video_meeting', label: '화상미팅', icon: Video },
                                         ].map((t) => {
                                             const Icon = t.icon;
                                             const isSelected = editingReport.type === t.id;

@@ -1,6 +1,10 @@
--- 1. profiles 테이블 수정 (auth.users와 연결)
--- 기존에 데이터가 있다면 백업하거나 정리 후 실행하세요.
-ALTER TABLE public.profiles ADD CONSTRAINT profiles_id_fkey FOREIGN KEY (id) REFERENCES auth.users (id) ON DELETE CASCADE;
+-- 1. profiles 테이블 수정 (auth.users와 연결) - 안전하게 실행
+DO $$ 
+BEGIN 
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'profiles_id_fkey') THEN 
+    ALTER TABLE public.profiles ADD CONSTRAINT profiles_id_fkey FOREIGN KEY (id) REFERENCES auth.users (id) ON DELETE CASCADE; 
+  END IF; 
+END $$;
 
 -- 2. 회원가입 시 자동으로 프로필을 생성하는 함수 및 트리거
 CREATE OR REPLACE FUNCTION public.handle_new_user()
@@ -24,17 +28,22 @@ CREATE OR REPLACE TRIGGER on_auth_user_created
 -- Profiles 정책
 DROP POLICY IF EXISTS "Profiles are viewable by everyone" ON public.profiles;
 CREATE POLICY "Profiles are viewable by everyone" ON public.profiles FOR SELECT USING (true);
+
+DROP POLICY IF EXISTS "Users can update their own profile" ON public.profiles;
 CREATE POLICY "Users can update their own profile" ON public.profiles FOR UPDATE USING (auth.uid() = id);
 
--- Reports 정책 (본인 것만 보게 하거나 팀장은 다 보게 함)
+-- Reports 정책 (기존 단순 정책 삭제)
 DROP POLICY IF EXISTS "Reports are viewable by everyone" ON public.reports;
 DROP POLICY IF EXISTS "Reports are insertable by everyone" ON public.reports;
 
--- 본인 보고서 조회/수정/삭제
+-- Reports 새 정책 (중복 방지 위해 삭제 후 생성)
+DROP POLICY IF EXISTS "Users can view their own reports" ON public.reports;
 CREATE POLICY "Users can view their own reports" ON public.reports FOR SELECT USING (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "Users can insert their own reports" ON public.reports;
 CREATE POLICY "Users can insert their own reports" ON public.reports FOR INSERT WITH CHECK (auth.uid() = user_id);
 
--- 팀장은 모든 보고서 조회 가능
+DROP POLICY IF EXISTS "Leaders can view all reports" ON public.reports;
 CREATE POLICY "Leaders can view all reports" ON public.reports FOR SELECT USING (
   EXISTS (
     SELECT 1 FROM public.profiles 

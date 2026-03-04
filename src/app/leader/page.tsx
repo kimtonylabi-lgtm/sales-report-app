@@ -105,7 +105,7 @@ export default function LeaderDashboard() {
                 format(new Date(r.created_at), 'yyyy-MM-dd HH:mm'),
                 (r.profiles as any)?.name || '알수없음',
                 (r.clients as any)?.name || '알수없음',
-                r.type === 'visit' ? '방문' : r.type === 'phone' ? '전화' : '메일',
+                r.type === 'visit' ? '방문' : r.type === 'phone' ? '전화' : r.type === 'offline_meeting' ? '오프라인 미팅' : r.type === 'video_meeting' ? '화상미팅' : '메일',
                 `"${r.content.replace(/"/g, '""')}"` // Escape quotes for CSV
             ]);
 

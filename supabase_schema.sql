@@ -24,7 +24,7 @@ CREATE TABLE public.reports (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   user_id UUID REFERENCES public.profiles(id) NOT NULL,
   client_id UUID REFERENCES public.clients(id) NOT NULL,
-  type TEXT NOT NULL CHECK (type IN ('visit', 'phone', 'email')),
+  type TEXT NOT NULL CHECK (type IN ('visit', 'phone', 'email', 'offline_meeting', 'video_meeting')),
   content TEXT NOT NULL,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
