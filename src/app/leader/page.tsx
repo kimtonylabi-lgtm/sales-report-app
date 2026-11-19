@@ -55,7 +55,7 @@ export default function LeaderDashboard() {
             supabase.from('reports').select('*', { count: 'exact', head: true }).gte('created_at', today.toISOString()),
             supabase.from('reports').select('*', { count: 'exact', head: true }),
             supabase.from('client_touch_summary').select('*'),
-            supabase.from('profiles').select('id, name').order('name'),
+            supabase.from('profiles').select('id, name').eq('is_active', true).order('name'),
         ]);
 
         setStats({ today: todayRes.count ?? 0, total: totalRes.count ?? 0 });

@@ -84,6 +84,7 @@ export default function HistoryPage() {
         supabase
             .from('profiles')
             .select('id, name')
+            .eq('is_active', true)
             .order('name')
             .then(({ data }) => setManagers(data ?? []));
     }, [profile]);
