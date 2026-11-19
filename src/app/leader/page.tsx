@@ -7,7 +7,7 @@ import { ko } from 'date-fns/locale';
 import { AlertCircle, TrendingUp, Users, Calendar, Download, Lock, BarChart3, ChevronDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/components/AuthProvider';
-import { activityOf } from '@/lib/activity';
+import { buildReportWorkbook, type ExportRow } from '@/lib/export-reports';
 
 /** Dormant thresholds offered to the leader (days since the last touch). */
 const DORMANT_DAYS = [30, 60, 90] as const;
@@ -32,8 +32,6 @@ type TouchSummary = {
 };
 type Manager = { id: string; name: string };
 
-/** Quote every CSV field so commas, quotes and line breaks inside names or content stay in one cell. */
-const csvCell = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
 
 export default function LeaderDashboard() {
     const { profile, loading: authLoading } = useAuth();
@@ -118,21 +116,18 @@ export default function LeaderDashboard() {
                 return;
             }
 
-            const headers = ['날짜', '작성자', '고객사', '활동종류', '보고내용'];
-            const rows = reports.map((r) => [
-                format(new Date(r.activity_at), 'yyyy-MM-dd HH:mm'),
-                (r.profiles as unknown as { name: string } | null)?.name || '알수없음',
-                (r.clients as unknown as { name: string } | null)?.name || '알수없음',
-                activityOf(r.type).label,
-                r.content,
-            ]);
-            const csvContent = '﻿' + [headers, ...rows].map((row) => row.map(csvCell).join(',')).join('\r\n');
-
-            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const rows: ExportRow[] = reports.map((r) => ({
+                activity_at: r.activity_at,
+                type: r.type,
+                content: r.content,
+                author: (r.profiles as unknown as { name: string } | null)?.name || '알수없음',
+                client: (r.clients as unknown as { name: string } | null)?.name || '알수없음',
+            }));
+            const blob = await buildReportWorkbook(rows, period.label);
             const url = URL.createObjectURL(blob);
             const link = document.createElement('a');
             link.setAttribute('href', url);
-            link.setAttribute('download', `영업보고현황_${period.label.replace(/\s/g, '')}_${format(new Date(), 'yyyyMMdd')}.csv`);
+            link.setAttribute('download', `영업보고현황_${period.label.replace(/\s/g, '')}_${format(new Date(), 'yyyyMMdd')}.xlsx`);
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
