@@ -45,6 +45,8 @@ export default function LeaderDashboard() {
     const [dormantDays, setDormantDays] = useState<(typeof DORMANT_DAYS)[number]>(30);
     const [owner, setOwner] = useState<string>('all');
     const [shown, setShown] = useState(DORMANT_PAGE);
+    // Collapsed by default — the list is long; the count in the header is enough at a glance.
+    const [dormantOpen, setDormantOpen] = useState(false);
     const [exportPeriod, setExportPeriod] = useState<(typeof EXPORT_PERIODS)[number]['id']>('today');
     const [isExporting, setIsExporting] = useState(false);
 
@@ -264,11 +266,23 @@ export default function LeaderDashboard() {
                         <AlertCircle size={20} className="mr-2" />
                         휴면 고객사
                     </h2>
-                    <span className="text-xs font-bold bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 px-2.5 py-1 rounded-full">
-                        {dormant.length}
-                    </span>
+                    <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 px-2.5 py-1 rounded-full">
+                            {dormant.length}
+                        </span>
+                        <button
+                            onClick={() => setDormantOpen((o) => !o)}
+                            aria-expanded={dormantOpen}
+                            className="flex items-center text-xs font-bold text-gray-600 dark:text-gray-300 bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 px-3 py-1.5 rounded-xl active:scale-95 transition-all"
+                        >
+                            {dormantOpen ? '접기' : '보기'}
+                            <ChevronDown size={14} className={cn('ml-1 transition-transform', dormantOpen && 'rotate-180')} />
+                        </button>
+                    </div>
                 </div>
 
+                {dormantOpen && (
+                <>
                 <div className="flex gap-2">
                     {DORMANT_DAYS.map((d) => (
                         <button
@@ -338,6 +352,8 @@ export default function LeaderDashboard() {
                     <div className="text-center py-10 bg-green-50 dark:bg-green-900/10 rounded-3xl text-green-600 text-sm font-medium">
                         관리가 필요한 휴면 고객이 없습니다.
                     </div>
+                )}
+                </>
                 )}
             </section>
         </div>
