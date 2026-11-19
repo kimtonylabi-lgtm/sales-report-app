@@ -73,8 +73,7 @@ export default function MyReportsPage() {
         setLoading(false);
     };
 
-    const handleUpdate = async (e: React.FormEvent) => {
-        e.preventDefault();
+    const handleUpdate = async () => {
         if (!editingReport) return;
 
         setIsUpdating(true);

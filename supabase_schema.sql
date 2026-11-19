@@ -44,6 +44,10 @@ CREATE POLICY "Clients are updatable by everyone" ON public.clients FOR UPDATE U
 
 CREATE POLICY "Reports are viewable by everyone" ON public.reports FOR SELECT USING (true);
 CREATE POLICY "Reports are insertable by everyone" ON public.reports FOR INSERT WITH CHECK (true);
+CREATE POLICY "Reports are updatable by owner or leader" ON public.reports FOR UPDATE
+  USING (auth.uid() = user_id OR EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'leader'));
+CREATE POLICY "Reports are deletable by owner or leader" ON public.reports FOR DELETE
+  USING (auth.uid() = user_id OR EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'leader'));
 
 -- 고객사 방문일 자동 업데이트 트리거
 CREATE OR REPLACE FUNCTION update_client_last_visited()
