@@ -47,13 +47,23 @@ export function ClientSearch({
         }
 
         const timer = setTimeout(async () => {
+            // Match on name_key so spacing and (주) don't matter: "한울 스크린" finds "한울스크린"
+            const key = nameKey(query);
+            if (!key) {
+                setResults([]);
+                return;
+            }
             const { data } = await supabase
                 .from('clients')
-                .select('id, name')
-                .ilike('name', `%${query}%`)
-                .limit(5);
-
-            setResults(data || []);
+                .select('id, name, name_key')
+                .ilike('name_key', `%${key}%`)
+                .limit(20);
+            // Names that start with what was typed first, then shorter (closer) names
+            const ranked = (data ?? [])
+                .sort((a, b) => Number(b.name_key.startsWith(key)) - Number(a.name_key.startsWith(key)) || a.name.length - b.name.length)
+                .slice(0, 5)
+                .map(({ id, name }) => ({ id, name }));
+            setResults(ranked);
         }, 300);
 
         return () => clearTimeout(timer);

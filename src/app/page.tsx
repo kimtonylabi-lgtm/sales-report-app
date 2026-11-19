@@ -1,23 +1,52 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ClientSearch } from '@/components/ClientSearch';
-import { Send, LogOut, User as UserIcon, Check, X, Key, ShieldCheck, Sparkles } from 'lucide-react';
+import { Send, LogOut, User as UserIcon, Check, X, Key, ShieldCheck, Sparkles, History } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { supabase } from '@/lib/supabase';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '@/components/AuthProvider';
 import { ACTIVITY_TYPES, type ActivityType } from '@/lib/activity';
+import { useRecentClients } from '@/hooks/use-recent-clients';
+import { useReportDraft } from '@/hooks/use-report-draft';
 
 type ClientRef = { id: string; name: string };
 
 export default function Home() {
   const { user, profile, loading, signOut, updateProfile, updatePassword } = useAuth();
   const [selectedClient, setSelectedClient] = useState<ClientRef | null>(null);
-  const [searchKey, setSearchKey] = useState(0); // remounts ClientSearch to reset it
+  const [searchKey, setSearchKey] = useState(0); // remounts ClientSearch to reset / preselect it
   const [reportType, setReportType] = useState<ActivityType | null>(null);
   const [content, setContent] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
+  const { recent, reload: reloadRecent } = useRecentClients(user?.id);
+  const draft = useReportDraft(
+    user?.id,
+    { client: selectedClient, type: reportType, content },
+    (d) => {
+      if (d.client) {
+        setSelectedClient(d.client);
+        setSearchKey((k) => k + 1);
+      }
+      if (d.type && ACTIVITY_TYPES.some((t) => t.id === d.type)) setReportType(d.type as ActivityType);
+      setContent(d.content ?? '');
+      setToast('작성 중이던 보고를 불러왔습니다');
+    }
+  );
+
+  // Short confirmation that disappears by itself — no extra tap on the phone
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), 2500);
+    return () => clearTimeout(t);
+  }, [toast]);
+
+  const pickClient = (c: ClientRef) => {
+    setSelectedClient(c);
+    setSearchKey((k) => k + 1);
+  };
   const [isEditingName, setIsEditingName] = useState(false);
   const [newName, setNewName] = useState('');
   const [isChangingPassword, setIsChangingPassword] = useState(false);
@@ -53,8 +82,10 @@ export default function Home() {
       ]);
       if (error) throw error;
 
-      alert('보고서가 제출되었습니다.');
+      draft.clear();
       resetForm();
+      reloadRecent();
+      setToast(`${selectedClient.name} 보고를 제출했습니다`);
     } catch (err) {
       alert('제출 실패: ' + (err instanceof Error ? err.message : String(err)));
     } finally {
@@ -206,6 +237,26 @@ export default function Home() {
               </button>
             </motion.div>
           )}
+          {!selectedClient && recent.length > 0 && (
+            <div className="space-y-2">
+              <div className="flex items-center text-xs font-bold text-gray-400 pl-1">
+                <History size={12} className="mr-1" />
+                최근 거래처
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {recent.map((c) => (
+                  <button
+                    key={c.id}
+                    type="button"
+                    onClick={() => pickClient(c)}
+                    className="px-3 py-2 rounded-xl text-sm font-bold bg-gray-50 dark:bg-gray-900/50 text-gray-600 dark:text-gray-300 active:scale-95 hover:bg-primary/10 hover:text-primary transition-all"
+                  >
+                    {c.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </section>
 
         <section className="space-y-3">
@@ -261,6 +312,22 @@ export default function Home() {
           </button>
         </div>
       </div>
+
+      <AnimatePresence>
+        {toast && (
+          <motion.div
+            role="status"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 10 }}
+            // Sits just above the bottom nav (4rem) and the phone's home bar
+            className="fixed left-1/2 -translate-x-1/2 bottom-[calc(5rem+env(safe-area-inset-bottom))] z-[60] max-w-[90vw] px-4 py-3 rounded-2xl bg-gray-900 text-white text-sm font-bold shadow-xl flex items-center"
+          >
+            <Check size={16} className="mr-2 text-green-400 shrink-0" />
+            <span className="truncate">{toast}</span>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Password Change Modal */}
       <AnimatePresence>
