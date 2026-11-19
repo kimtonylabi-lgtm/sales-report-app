@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase';
-import { format, subDays, startOfDay, startOfMonth, subMonths, differenceInDays } from 'date-fns';
+import { format, subDays, addDays, startOfDay, startOfMonth, startOfWeek, subMonths, subWeeks, differenceInDays } from 'date-fns';
 import { AlertCircle, TrendingUp, Users, Calendar, Download, Lock, ChevronDown, UserCheck } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/components/AuthProvider';
@@ -12,14 +12,28 @@ import { buildReportWorkbook, type ClientKind, type ExportRow } from '@/lib/expo
 const DORMANT_DAYS = [30, 60, 90] as const;
 const DORMANT_PAGE = 50;
 
-/** CSV period choices: [label, start date or null for all time, end date or null for now]. */
+/** Weeks start on Monday, like the team's weekly report. */
+const WEEK = { weekStartsOn: 1 } as const;
+
+/** Export period choices: range() = [start or null for all time, end (exclusive) or null for now]. */
 const EXPORT_PERIODS = [
+    // Reports written in the evening are often reviewed the next morning, so yesterday is the default.
+    { id: 'yesterday', label: '어제', range: () => [subDays(startOfDay(new Date()), 1), startOfDay(new Date())] as const },
     { id: 'today', label: '오늘', range: () => [startOfDay(new Date()), null] as const },
+    { id: 'thisWeek', label: '이번 주', range: () => [startOfWeek(new Date(), WEEK), null] as const },
+    { id: 'lastWeek', label: '지난주', range: () => [startOfWeek(subWeeks(new Date(), 1), WEEK), startOfWeek(new Date(), WEEK)] as const },
     { id: 'thisMonth', label: '이번 달', range: () => [startOfMonth(new Date()), null] as const },
     { id: 'lastMonth', label: '지난달', range: () => [startOfMonth(subMonths(new Date(), 1)), startOfMonth(new Date())] as const },
     { id: 'last3', label: '최근 3개월', range: () => [startOfMonth(subMonths(new Date(), 2)), null] as const },
     { id: 'all', label: '전체', range: () => [null, null] as const },
 ] as const;
+type ExportPeriodId = (typeof EXPORT_PERIODS)[number]['id'] | 'custom';
+
+/** Parses an <input type="date"> value (yyyy-MM-dd) as local midnight. */
+const parseDateInput = (v: string) => {
+    const [y, m, d] = v.split('-').map(Number);
+    return new Date(y, m - 1, d);
+};
 
 /** One row of the client_touch_summary view (supabase_client_kinds_2026-11.sql). */
 type TouchSummary = {
@@ -44,7 +58,9 @@ export default function LeaderDashboard() {
     const [shown, setShown] = useState(DORMANT_PAGE);
     // Collapsed by default — the list is long; the count in the header is enough at a glance.
     const [dormantOpen, setDormantOpen] = useState(false);
-    const [exportPeriod, setExportPeriod] = useState<(typeof EXPORT_PERIODS)[number]['id']>('today');
+    const [exportPeriod, setExportPeriod] = useState<ExportPeriodId>('yesterday');
+    const [customFrom, setCustomFrom] = useState(() => format(subDays(new Date(), 7), 'yyyy-MM-dd'));
+    const [customTo, setCustomTo] = useState(() => format(subDays(new Date(), 1), 'yyyy-MM-dd'));
     const [isExporting, setIsExporting] = useState(false);
     const [todayStatus, setTodayStatus] = useState<{ id: string; name: string; count: number }[]>([]);
 
@@ -107,10 +123,29 @@ export default function LeaderDashboard() {
     }, [summary, dormantDays, owner]);
 
     const handleExport = async () => {
+        let from: Date | null;
+        let to: Date | null;
+        let label: string;
+        if (exportPeriod === 'custom') {
+            if (!customFrom || !customTo) {
+                alert('시작일과 종료일을 모두 골라 주세요.');
+                return;
+            }
+            if (customFrom > customTo) {
+                alert('시작일이 종료일보다 늦습니다.');
+                return;
+            }
+            from = parseDateInput(customFrom);
+            to = addDays(parseDateInput(customTo), 1); // end date is inclusive
+            label = `${format(from, 'MM.dd')}~${format(parseDateInput(customTo), 'MM.dd')}`;
+        } else {
+            const period = EXPORT_PERIODS.find((p) => p.id === exportPeriod)!;
+            [from, to] = period.range();
+            label = period.label;
+        }
+
         setIsExporting(true);
         try {
-            const period = EXPORT_PERIODS.find((p) => p.id === exportPeriod)!;
-            const [from, to] = period.range();
             let query = supabase
                 .from('reports')
                 .select('activity_at, type, content, clients (name, kind), profiles (name)')
@@ -136,11 +171,11 @@ export default function LeaderDashboard() {
                     kind: client?.kind ?? 'customer',
                 };
             });
-            const blob = await buildReportWorkbook(rows, period.label);
+            const blob = await buildReportWorkbook(rows, label);
             const url = URL.createObjectURL(blob);
             const link = document.createElement('a');
             link.setAttribute('href', url);
-            link.setAttribute('download', `영업보고현황_${period.label.replace(/\s/g, '')}_${format(new Date(), 'yyyyMMdd')}.xlsx`);
+            link.setAttribute('download', `영업보고현황_${label.replace(/\s/g, '').replace('~', '-')}_${format(new Date(), 'yyyyMMdd')}.xlsx`);
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
@@ -269,7 +304,35 @@ export default function LeaderDashboard() {
                             {p.label}
                         </button>
                     ))}
+                    <button
+                        onClick={() => setExportPeriod('custom')}
+                        className={cn(
+                            'px-3 py-1.5 rounded-xl text-xs font-bold transition-all',
+                            exportPeriod === 'custom' ? 'bg-primary/10 text-primary ring-1 ring-primary/30' : 'bg-gray-50 dark:bg-gray-900/50 text-gray-500'
+                        )}
+                    >
+                        기간 설정
+                    </button>
                 </div>
+                {exportPeriod === 'custom' && (
+                    <div className="flex items-center gap-2">
+                        <input
+                            type="date"
+                            value={customFrom}
+                            max={customTo || undefined}
+                            onChange={(e) => setCustomFrom(e.target.value)}
+                            className="min-w-0 flex-1 rounded-xl bg-gray-50 dark:bg-gray-900/50 px-3 py-2 text-sm"
+                        />
+                        <span className="text-sm text-gray-400">~</span>
+                        <input
+                            type="date"
+                            value={customTo}
+                            min={customFrom || undefined}
+                            onChange={(e) => setCustomTo(e.target.value)}
+                            className="min-w-0 flex-1 rounded-xl bg-gray-50 dark:bg-gray-900/50 px-3 py-2 text-sm"
+                        />
+                    </div>
+                )}
             </section>
 
             {/* Dormant Clients Section */}
