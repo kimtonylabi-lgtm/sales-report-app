@@ -12,6 +12,9 @@ import { buildReportWorkbook, type ClientKind, type ExportRow } from '@/lib/expo
 const DORMANT_DAYS = [30, 60, 90] as const;
 const DORMANT_PAGE = 50;
 
+/** Staff who do not keep a daily log (e.g. key-account owners for 토니모리·라비오뜨) — left out of today's status. */
+const NO_DAILY_REPORT = new Set(['김을한']);
+
 /** Weeks start on Monday, like the team's weekly report. */
 const WEEK = { weekStartsOn: 1 } as const;
 
@@ -83,9 +86,10 @@ export default function LeaderDashboard() {
             if (new Date(r.created_at) >= today) todayCount.set(r.user_id, (todayCount.get(r.user_id) ?? 0) + 1);
         }
         const staff = (managersRes.data ?? []) as Manager[];
-        // Every active account, leaders included.
+        // Every active account, leaders included, except people who do not keep a daily log.
         setTodayStatus(
             staff
+                .filter((m) => !NO_DAILY_REPORT.has(m.name))
                 .map((m) => ({ id: m.id, name: m.name, count: todayCount.get(m.id) ?? 0 }))
                 .sort((a, b) => a.count - b.count || a.name.localeCompare(b.name, 'ko'))
         );
