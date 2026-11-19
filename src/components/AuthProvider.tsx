@@ -103,7 +103,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
             setLoading(false);
 
-            if (_event === 'SIGNED_IN') {
+            // supabase-js re-emits SIGNED_IN whenever the tab becomes visible again (session
+            // recovery), so only leave the page when the user is actually on the login screen.
+            if (_event === 'SIGNED_IN' && window.location.pathname.startsWith('/login')) {
                 router.refresh();
                 router.push('/');
             }
