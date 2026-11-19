@@ -10,6 +10,10 @@ import { useAuth } from '@/components/AuthProvider';
 import { ACTIVITY_TYPES, type ActivityType } from '@/lib/activity';
 import { useRecentClients } from '@/hooks/use-recent-clients';
 import { useReportDraft } from '@/hooks/use-report-draft';
+import { useTodayReports } from '@/hooks/use-today-reports';
+import { ReportEditModal, type EditableReport } from '@/components/ReportEditModal';
+import { activityOf } from '@/lib/activity';
+import { format } from 'date-fns';
 
 type ClientRef = { id: string; name: string };
 
@@ -22,6 +26,8 @@ export default function Home() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const { recent, reload: reloadRecent } = useRecentClients(user?.id);
+  const { today, reload: reloadToday } = useTodayReports(user?.id);
+  const [editing, setEditing] = useState<EditableReport | null>(null);
   const draft = useReportDraft(
     user?.id,
     { client: selectedClient, type: reportType, content },
@@ -85,6 +91,7 @@ export default function Home() {
       draft.clear();
       resetForm();
       reloadRecent();
+      reloadToday();
       setToast(`${selectedClient.name} 보고를 제출했습니다`);
     } catch (err) {
       alert('제출 실패: ' + (err instanceof Error ? err.message : String(err)));
@@ -312,6 +319,53 @@ export default function Home() {
           </button>
         </div>
       </div>
+
+      {/* 오늘 내 보고 — the daily report as it builds up; tap one to fix it */}
+      {today.length > 0 && (
+        <section className="space-y-3">
+          <div className="flex items-center justify-between px-1">
+            <h2 className="text-sm font-black text-gray-700 dark:text-gray-200">오늘 내 보고</h2>
+            <span className="text-xs font-bold text-primary bg-primary/10 px-2.5 py-1 rounded-full">{today.length}건</span>
+          </div>
+          <div className="space-y-2">
+            {today.map((r) => {
+              const t = activityOf(r.type);
+              const Icon = t.icon;
+              return (
+                <button
+                  key={r.id}
+                  type="button"
+                  onClick={() => setEditing({ id: r.id, type: r.type, content: r.content, clientName: r.clients?.name })}
+                  className="w-full flex items-start text-left p-3 rounded-2xl bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 active:scale-[0.99] transition-all"
+                >
+                  <div className={cn('p-2 rounded-xl mr-3 shrink-0', t.soft)}>
+                    <Icon size={16} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-sm text-gray-800 dark:text-gray-100 truncate">{r.clients?.name}</span>
+                      <span className="text-[11px] font-bold text-gray-400 shrink-0 ml-2">{format(new Date(r.created_at), 'HH:mm')}</span>
+                    </div>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 line-clamp-1 mt-0.5">{r.content}</p>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+          <p className="text-[11px] text-gray-400 px-1">누르면 고치거나 지울 수 있습니다.</p>
+        </section>
+      )}
+
+      <ReportEditModal
+        report={editing}
+        onClose={() => setEditing(null)}
+        onDone={(message) => {
+          setEditing(null);
+          reloadToday();
+          reloadRecent();
+          setToast(message);
+        }}
+      />
 
       <AnimatePresence>
         {toast && (

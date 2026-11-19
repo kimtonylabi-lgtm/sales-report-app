@@ -4,11 +4,12 @@ import { useCallback, useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { format } from 'date-fns';
 import { ko } from 'date-fns/locale';
-import { FileText, Pencil, X, Send, Trash2, ChevronDown } from 'lucide-react';
+import { FileText, Pencil, ChevronDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { useAuth } from '@/components/AuthProvider';
-import { ACTIVITY_TYPES, activityOf } from '@/lib/activity';
+import { activityOf } from '@/lib/activity';
+import { ReportEditModal } from '@/components/ReportEditModal';
 
 const PAGE_SIZE = 50;
 
@@ -31,8 +32,6 @@ export default function MyReportsPage() {
     const [loading, setLoading] = useState(true);
     const [loadingMore, setLoadingMore] = useState(false);
     const [editingReport, setEditingReport] = useState<Report | null>(null);
-    const [isUpdating, setIsUpdating] = useState(false);
-    const [isDeleting, setIsDeleting] = useState(false);
     const [managers, setManagers] = useState<Manager[]>([]);
     const [selectedManager, setSelectedManager] = useState<string>('all');
 
@@ -60,14 +59,21 @@ export default function MyReportsPage() {
         setLoading(false);
     }, [fetchPage]);
 
+    // Load (and re-load when the person filter changes). The spinner for a filter change is turned on
+    // in the select's onChange, so this effect only sets state after the data arrives.
     useEffect(() => {
-        if (authLoading) return;
-        if (!user) {
+        if (authLoading || !user) return; // signed-out visitors are redirected by the middleware
+        let active = true;
+        fetchPage(0).then(({ rows, count }) => {
+            if (!active) return;
+            setReports(rows);
+            setTotal(count);
             setLoading(false);
-            return;
-        }
-        reload();
-    }, [authLoading, user, reload]);
+        });
+        return () => {
+            active = false;
+        };
+    }, [authLoading, user, fetchPage]);
 
     useEffect(() => {
         if (!isLeader) return;
@@ -84,53 +90,6 @@ export default function MyReportsPage() {
         const { rows } = await fetchPage(reports.length);
         setReports((prev) => [...prev, ...rows]);
         setLoadingMore(false);
-    };
-
-    const handleUpdate = async () => {
-        if (!editingReport) return;
-
-        setIsUpdating(true);
-        try {
-            const { error } = await supabase
-                .from('reports')
-                .update({
-                    type: editingReport.type,
-                    content: editingReport.content,
-                })
-                .eq('id', editingReport.id);
-
-            if (error) throw error;
-
-            alert('보고서가 수정되었습니다.');
-            setEditingReport(null);
-            reload();
-        } catch (error) {
-            alert('수정 실패: ' + (error instanceof Error ? error.message : String(error)));
-        } finally {
-            setIsUpdating(false);
-        }
-    };
-
-    const handleDelete = async () => {
-        if (!editingReport) return;
-        if (!confirm('정말 이 보고서를 삭제하시겠습니까?')) return;
-
-        setIsDeleting(true);
-        try {
-            const { error } = await supabase
-                .from('reports')
-                .delete()
-                .eq('id', editingReport.id);
-
-            if (error) throw error;
-
-            setEditingReport(null);
-            reload();
-        } catch (error) {
-            alert('삭제 실패: ' + (error instanceof Error ? error.message : String(error)));
-        } finally {
-            setIsDeleting(false);
-        }
     };
 
     return (
@@ -153,7 +112,10 @@ export default function MyReportsPage() {
                 <div className="relative group">
                     <select
                         value={selectedManager}
-                        onChange={(e) => setSelectedManager(e.target.value)}
+                        onChange={(e) => {
+                            setLoading(true);
+                            setSelectedManager(e.target.value);
+                        }}
                         className="w-full bg-white dark:bg-gray-800 border-2 border-transparent hover:border-primary/20 rounded-2xl pl-5 pr-10 py-4 text-sm font-bold appearance-none focus:outline-none focus:ring-2 focus:ring-primary/50 shadow-sm transition-all cursor-pointer"
                     >
                         <option value="all">전체 담당자 보기</option>
@@ -165,7 +127,7 @@ export default function MyReportsPage() {
                 </div>
             )}
 
-            {loading ? (
+            {loading && user ? (
                 <div className="flex justify-center py-20">
                     <div className="animate-spin h-10 w-10 border-4 border-primary border-t-transparent rounded-full" />
                 </div>
@@ -233,88 +195,14 @@ export default function MyReportsPage() {
                 </div>
             )}
 
-            {/* Edit Modal */}
-            <AnimatePresence>
-                {editingReport && (
-                    <div className="fixed inset-0 z-50 flex items-center justify-center p-6 bg-black/60 backdrop-blur-md">
-                        <motion.div
-                            initial={{ scale: 0.9, opacity: 0 }}
-                            animate={{ scale: 1, opacity: 1 }}
-                            exit={{ scale: 0.9, opacity: 0 }}
-                            className="bg-white dark:bg-gray-900 w-full max-w-md p-8 rounded-[2.5rem] shadow-2xl space-y-6 border border-gray-100 dark:border-gray-800"
-                        >
-                            <div className="flex justify-between items-center mb-2">
-                                <h2 className="text-2xl font-black text-gray-900 dark:text-white">보고서 수정</h2>
-                                <div className="flex items-center space-x-2">
-                                    <button
-                                        onClick={handleDelete}
-                                        disabled={isDeleting || isUpdating}
-                                        aria-label="보고서 삭제"
-                                        className="p-3 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-2xl transition-colors disabled:opacity-50"
-                                    >
-                                        <Trash2 size={20} />
-                                    </button>
-                                    <button onClick={() => setEditingReport(null)} aria-label="닫기" className="p-3 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-2xl transition-colors text-gray-500">
-                                        <X size={20} />
-                                    </button>
-                                </div>
-                            </div>
-
-                            <div className="space-y-5">
-                                <div className="space-y-2">
-                                    <label className="text-xs font-bold text-gray-400 uppercase tracking-wider ml-1">활동 종류</label>
-                                    <div className="grid grid-cols-3 gap-3">
-                                        {ACTIVITY_TYPES.map((t) => {
-                                            const Icon = t.icon;
-                                            const isSelected = editingReport.type === t.id;
-                                            return (
-                                                <button
-                                                    key={t.id}
-                                                    onClick={() => setEditingReport({ ...editingReport, type: t.id })}
-                                                    className={cn(
-                                                        'flex flex-col items-center justify-start px-2 py-4 rounded-2xl transition-all border-2',
-                                                        isSelected
-                                                            ? 'border-primary bg-primary/5 text-primary shadow-sm'
-                                                            : 'border-transparent bg-gray-50 dark:bg-gray-800 text-gray-400'
-                                                    )}
-                                                >
-                                                    <Icon size={20} className={cn('mb-1 transition-transform', isSelected && 'scale-110')} />
-                                                    <span className="text-xs font-bold text-center leading-tight break-keep">{t.label}</span>
-                                                </button>
-                                            );
-                                        })}
-                                    </div>
-                                </div>
-
-                                <div className="space-y-2">
-                                    <label className="text-xs font-bold text-gray-400 uppercase tracking-wider ml-1">보고 내용</label>
-                                    <textarea
-                                        value={editingReport.content}
-                                        onChange={(e) => setEditingReport({ ...editingReport, content: e.target.value })}
-                                        rows={6}
-                                        className="w-full p-5 rounded-2xl bg-gray-50 dark:bg-gray-800 border-2 border-transparent focus:border-primary/20 focus:bg-white dark:focus:bg-gray-900 outline-none transition-all resize-none text-sm font-medium leading-relaxed"
-                                    />
-                                </div>
-                            </div>
-
-                            <button
-                                onClick={handleUpdate}
-                                disabled={isUpdating || isDeleting}
-                                className="w-full bg-primary text-white py-4 rounded-2xl font-bold flex items-center justify-center space-x-2 shadow-lg shadow-primary/30 active:scale-95 transition-all disabled:opacity-50 text-lg mt-4"
-                            >
-                                {isUpdating ? (
-                                    <div className="animate-spin h-6 w-6 border-4 border-white border-t-transparent rounded-full" />
-                                ) : (
-                                    <>
-                                        <Send size={20} />
-                                        <span>수정 완료</span>
-                                    </>
-                                )}
-                            </button>
-                        </motion.div>
-                    </div>
-                )}
-            </AnimatePresence>
+            <ReportEditModal
+                report={editingReport && { id: editingReport.id, type: editingReport.type, content: editingReport.content, clientName: editingReport.clients?.name }}
+                onClose={() => setEditingReport(null)}
+                onDone={() => {
+                    setEditingReport(null);
+                    reload();
+                }}
+            />
         </div>
     );
 }

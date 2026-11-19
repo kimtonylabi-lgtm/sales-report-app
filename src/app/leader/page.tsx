@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { format, subDays, startOfDay, startOfMonth, subMonths, differenceInDays } from 'date-fns';
-import { AlertCircle, TrendingUp, Users, Calendar, Download, Lock, ChevronDown } from 'lucide-react';
+import { AlertCircle, TrendingUp, Users, Calendar, Download, Lock, ChevronDown, UserCheck } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/components/AuthProvider';
 import { buildReportWorkbook, type ClientKind, type ExportRow } from '@/lib/export-reports';
@@ -30,7 +30,7 @@ type TouchSummary = {
     report_count: number;
     last_user_id: string | null;
 };
-type Manager = { id: string; name: string };
+type Manager = { id: string; name: string; role?: string };
 
 
 export default function LeaderDashboard() {
@@ -46,21 +46,40 @@ export default function LeaderDashboard() {
     const [dormantOpen, setDormantOpen] = useState(false);
     const [exportPeriod, setExportPeriod] = useState<(typeof EXPORT_PERIODS)[number]['id']>('today');
     const [isExporting, setIsExporting] = useState(false);
+    const [todayStatus, setTodayStatus] = useState<{ id: string; name: string; count: number }[]>([]);
 
     const loadDashboard = useCallback(async () => {
         setLoading(true);
         const today = startOfDay(new Date());
 
-        const [todayRes, totalRes, summaryRes, managersRes] = await Promise.all([
+        const [todayRes, totalRes, summaryRes, managersRes, recentRes] = await Promise.all([
             supabase.from('reports').select('*', { count: 'exact', head: true }).gte('created_at', today.toISOString()),
             supabase.from('reports').select('*', { count: 'exact', head: true }),
             supabase.from('client_touch_summary').select('*'),
-            supabase.from('profiles').select('id, name').eq('is_active', true).order('name'),
+            supabase.from('profiles').select('id, name, role').eq('is_active', true).order('name'),
+            // last 30 days of who-reported-when: today's counts + who is a regular reporter
+            supabase.from('reports').select('user_id, created_at').gte('created_at', subDays(today, 30).toISOString()),
         ]);
+
+        const recent = recentRes.data ?? [];
+        const todayCount = new Map<string, number>();
+        for (const r of recent) {
+            if (new Date(r.created_at) >= today) todayCount.set(r.user_id, (todayCount.get(r.user_id) ?? 0) + 1);
+        }
+        const reporters = new Set(recent.map((r) => r.user_id));
+        const staff = (managersRes.data ?? []) as Manager[];
+        // Everyone in sales, plus leaders who actually file reports — so a leader who never reports
+        // does not show up as a red 0 every day.
+        setTodayStatus(
+            staff
+                .filter((m) => m.role === 'sales' || reporters.has(m.id))
+                .map((m) => ({ id: m.id, name: m.name, count: todayCount.get(m.id) ?? 0 }))
+                .sort((a, b) => a.count - b.count || a.name.localeCompare(b.name, 'ko'))
+        );
 
         setStats({ today: todayRes.count ?? 0, total: totalRes.count ?? 0 });
         setSummary((summaryRes.data ?? []) as TouchSummary[]);
-        setManagers(managersRes.data ?? []);
+        setManagers(staff);
         setLoading(false);
     }, []);
 
@@ -165,6 +184,38 @@ export default function LeaderDashboard() {
                 <h1 className="text-2xl font-bold">관리자 대시보드</h1>
                 <p className="text-gray-500">팀 활동 현황 및 휴면 고객 관리</p>
             </header>
+
+            {/* Today's submission status — who has / hasn't filed a report yet today */}
+            <section className="bg-white dark:bg-gray-800 p-5 rounded-3xl shadow-sm border border-gray-100 dark:border-gray-700 space-y-3">
+                <div className="flex items-center justify-between">
+                    <h2 className="text-sm font-bold flex items-center">
+                        <UserCheck size={16} className="mr-2 text-primary" />
+                        오늘 제출 현황
+                    </h2>
+                    {!loading && (
+                        <span className="text-xs font-bold text-gray-500">
+                            {todayStatus.filter((s) => s.count > 0).length} / {todayStatus.length}명 제출
+                        </span>
+                    )}
+                </div>
+                {loading ? (
+                    <div className="text-xs text-gray-400 py-2">불러오는 중...</div>
+                ) : (
+                    <div className="flex flex-wrap gap-2">
+                        {todayStatus.map((s) => (
+                            <span
+                                key={s.id}
+                                className={cn(
+                                    'px-3 py-1.5 rounded-xl text-sm font-bold',
+                                    s.count === 0 ? 'bg-red-50 text-red-500 dark:bg-red-900/20' : 'bg-primary/10 text-primary'
+                                )}
+                            >
+                                {s.name} {s.count === 0 ? '미제출' : `${s.count}건`}
+                            </span>
+                        ))}
+                    </div>
+                )}
+            </section>
 
             {/* Stats Cards */}
             <div className="grid grid-cols-2 gap-4">
