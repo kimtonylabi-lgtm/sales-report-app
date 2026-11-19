@@ -72,6 +72,8 @@ function Timeline({ reports, showClient, dateFormat }: { reports: HistoryReport[
 
 export default function HistoryPage() {
     const { profile } = useAuth();
+    // Sales staff only see their own reports (RLS: leaders see everyone), so titles say "내" for them.
+    const isLeader = profile?.role === 'leader';
     const [selectedClient, setSelectedClient] = useState<{ id: string; name: string } | null>(null);
     const [reports, setReports] = useState<HistoryReport[]>([]);
     const [loading, setLoading] = useState(false);
@@ -117,7 +119,7 @@ export default function HistoryPage() {
         <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
             <header className="flex flex-col space-y-2">
                 <h1 className="text-3xl font-black text-gray-900 dark:text-white">고객사 히스토리</h1>
-                <p className="text-gray-500 font-medium">과거 활동 내역을 확인하세요</p>
+                <p className="text-gray-500 font-medium">{isLeader ? '팀 전체의 과거 활동 내역을 확인하세요' : '내가 남긴 과거 활동 내역을 확인하세요'}</p>
             </header>
 
             <div className="card-premium p-6 py-8 space-y-6">
@@ -151,7 +153,7 @@ export default function HistoryPage() {
             ) : selectedClient ? (
                 <div className="space-y-8 px-2">
                     <div className="flex items-center justify-between">
-                        <h2 className="text-xl font-black text-gray-800 dark:text-gray-100">{selectedClient.name} 타임라인</h2>
+                        <h2 className="text-xl font-black text-gray-800 dark:text-gray-100">{selectedClient.name} {isLeader ? '타임라인' : '내 활동'}</h2>
                         <span className="text-xs font-bold text-primary bg-primary/10 px-3 py-1.5 rounded-full">{reports.length}건</span>
                     </div>
                     {reports.length > 0 ? (
@@ -163,7 +165,7 @@ export default function HistoryPage() {
             ) : (
                 <div className="space-y-8 px-2">
                     <div className="flex items-center justify-between">
-                        <h2 className="text-xl font-black text-gray-800 dark:text-gray-100">오늘의 전체 활동</h2>
+                        <h2 className="text-xl font-black text-gray-800 dark:text-gray-100">{isLeader ? '오늘의 전체 활동' : '오늘 내 활동'}</h2>
                         <span className="text-xs font-bold text-primary bg-primary/10 px-3 py-1.5 rounded-full">{todayReports.length}건</span>
                     </div>
                     {todayReports.length > 0 ? (
