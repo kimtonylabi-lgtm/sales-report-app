@@ -1,44 +1,23 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useState } from 'react';
 import { ClientSearch } from '@/components/ClientSearch';
-import { Send, LogOut, User as UserIcon, Check, X, Key, ShieldCheck, Sparkles, CalendarClock, BellRing } from 'lucide-react';
+import { Send, LogOut, User as UserIcon, Check, X, Key, ShieldCheck, Sparkles } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { supabase } from '@/lib/supabase';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '@/components/AuthProvider';
-import { ACTIVITY_TYPES, type ActivityType, todayStr } from '@/lib/activity';
-import { addDays, differenceInCalendarDays, format, parseISO } from 'date-fns';
-import { ko } from 'date-fns/locale';
-
-/** One tap instead of a date picker — the default ("안 함") keeps the form as simple as before. */
-const NEXT_CONTACT_CHOICES: { label: string; days: number | null }[] = [
-  { label: '안 함', days: null },
-  { label: '3일 뒤', days: 3 },
-  { label: '1주 뒤', days: 7 },
-  { label: '2주 뒤', days: 14 },
-  { label: '한 달 뒤', days: 30 },
-];
+import { ACTIVITY_TYPES, type ActivityType } from '@/lib/activity';
 
 type ClientRef = { id: string; name: string };
-type FollowUp = {
-  id: string;
-  activity_at: string;
-  next_contact_on: string;
-  next_action: string | null;
-  clients: { id: string; name: string; last_visited_at: string | null } | null;
-};
 
 export default function Home() {
   const { user, profile, loading, signOut, updateProfile, updatePassword } = useAuth();
   const [selectedClient, setSelectedClient] = useState<ClientRef | null>(null);
-  const [searchKey, setSearchKey] = useState(0); // remounts ClientSearch to reset / preselect it
+  const [searchKey, setSearchKey] = useState(0); // remounts ClientSearch to reset it
   const [reportType, setReportType] = useState<ActivityType | null>(null);
   const [content, setContent] = useState('');
-  const [nextContactOn, setNextContactOn] = useState('');
-  const [nextAction, setNextAction] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [followUps, setFollowUps] = useState<FollowUp[]>([]);
   const [isEditingName, setIsEditingName] = useState(false);
   const [newName, setNewName] = useState('');
   const [isChangingPassword, setIsChangingPassword] = useState(false);
@@ -46,51 +25,11 @@ export default function Home() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [isPasswordUpdating, setIsPasswordUpdating] = useState(false);
 
-  /**
-   * 「오늘 연락할 곳」 — my reports whose next-contact date has arrived, for clients nobody has
-   * touched since that report. Once anyone files a newer report for the client it drops off.
-   */
-  const loadFollowUps = useCallback(async () => {
-    if (!user) return;
-    const { data } = await supabase
-      .from('reports')
-      .select('id, activity_at, next_contact_on, next_action, clients(id, name, last_visited_at)')
-      .eq('user_id', user.id)
-      .not('next_contact_on', 'is', null)
-      .lte('next_contact_on', todayStr())
-      .order('next_contact_on', { ascending: true })
-      .limit(200);
-    const rows = (data ?? []) as unknown as FollowUp[];
-    const byClient = new Map<string, FollowUp>();
-    for (const r of rows) {
-      const c = r.clients;
-      if (!c) continue;
-      const touchedSince = c.last_visited_at && new Date(c.last_visited_at) > new Date(r.activity_at);
-      if (touchedSince) continue;
-      const prev = byClient.get(c.id);
-      if (!prev || prev.activity_at < r.activity_at) byClient.set(c.id, r);
-    }
-    setFollowUps([...byClient.values()].sort((a, b) => a.next_contact_on.localeCompare(b.next_contact_on)));
-  }, [user]);
-
-  useEffect(() => {
-    if (!loading && user) loadFollowUps();
-  }, [loading, user, loadFollowUps]);
-
   const resetForm = () => {
     setSelectedClient(null);
     setSearchKey((k) => k + 1);
     setReportType(null);
     setContent('');
-    setNextContactOn('');
-    setNextAction('');
-  };
-
-  const pickFollowUp = (f: FollowUp) => {
-    if (!f.clients) return;
-    setSelectedClient({ id: f.clients.id, name: f.clients.name });
-    setSearchKey((k) => k + 1);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleSubmit = async () => {
@@ -110,15 +49,12 @@ export default function Home() {
           client_id: selectedClient.id,
           type: reportType,
           content,
-          next_contact_on: nextContactOn || null,
-          next_action: nextContactOn && nextAction.trim() ? nextAction.trim() : null,
         },
       ]);
       if (error) throw error;
 
       alert('보고서가 제출되었습니다.');
       resetForm();
-      loadFollowUps();
     } catch (err) {
       alert('제출 실패: ' + (err instanceof Error ? err.message : String(err)));
     } finally {
@@ -240,39 +176,6 @@ export default function Home() {
         </div>
       </header>
 
-      {followUps.length > 0 && (
-        <section className="card-premium p-5 space-y-3">
-          <div className="flex items-center justify-between">
-            <h2 className="flex items-center text-sm font-black text-gray-800 dark:text-gray-100">
-              <BellRing size={16} className="mr-2 text-primary" />
-              오늘 연락할 곳
-            </h2>
-            <span className="text-xs font-bold text-primary bg-primary/10 px-2.5 py-1 rounded-full">{followUps.length}</span>
-          </div>
-          <div className="space-y-2">
-            {followUps.map((f) => {
-              const late = differenceInCalendarDays(new Date(), parseISO(f.next_contact_on));
-              return (
-                <button
-                  key={f.id}
-                  onClick={() => pickFollowUp(f)}
-                  className="w-full flex items-center justify-between text-left p-3 rounded-2xl bg-gray-50 dark:bg-gray-900/50 hover:bg-primary/5 active:scale-[0.99] transition-all"
-                >
-                  <div className="min-w-0">
-                    <div className="font-bold text-gray-800 dark:text-gray-100 truncate">{f.clients?.name}</div>
-                    {f.next_action && <div className="text-xs text-gray-500 truncate mt-0.5">{f.next_action}</div>}
-                  </div>
-                  <span className={cn('text-xs font-bold shrink-0 ml-3', late > 0 ? 'text-red-500' : 'text-primary')}>
-                    {late > 0 ? `${late}일 지남` : '오늘'}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-          <p className="text-[11px] text-gray-400">누르면 아래 보고 작성에 고객사가 들어갑니다. 보고를 내면 목록에서 빠집니다.</p>
-        </section>
-      )}
-
       <div className="card-premium p-6 space-y-6">
         <section className="space-y-3">
           <label className="text-sm font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider pl-1">1. 고객사 선택</label>
@@ -339,49 +242,6 @@ export default function Home() {
             rows={4}
             className="w-full p-5 rounded-2xl bg-gray-50 dark:bg-gray-900/50 border-2 border-transparent focus:border-primary/20 focus:bg-white dark:focus:bg-gray-900 outline-none transition-all placeholder:text-gray-400 resize-none font-medium"
           />
-        </section>
-
-        <section className="space-y-3">
-          <label className="text-sm font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider pl-1 flex items-center">
-            <CalendarClock size={14} className="mr-1.5" />
-            4. 다음 연락 (선택)
-          </label>
-          <div className="flex flex-wrap gap-2">
-            {NEXT_CONTACT_CHOICES.map((c) => {
-              const value = c.days === null ? '' : format(addDays(new Date(), c.days), 'yyyy-MM-dd');
-              const isSelected = nextContactOn === value;
-              return (
-                <button
-                  key={c.label}
-                  type="button"
-                  onClick={() => {
-                    setNextContactOn(value);
-                    if (!value) setNextAction('');
-                  }}
-                  className={cn(
-                    'px-3.5 py-2 rounded-xl text-sm font-bold transition-all active:scale-95',
-                    isSelected ? 'bg-primary text-white shadow-md shadow-primary/30' : 'bg-gray-50 dark:bg-gray-900/50 text-gray-500'
-                  )}
-                >
-                  {c.label}
-                </button>
-              );
-            })}
-          </div>
-          {nextContactOn && (
-            <p className="text-xs font-bold text-primary pl-1">
-              {format(parseISO(nextContactOn), 'M월 d일(E)', { locale: ko })}에 「오늘 연락할 곳」에 뜹니다.
-            </p>
-          )}
-          {nextContactOn && (
-            <input
-              type="text"
-              value={nextAction}
-              onChange={(e) => setNextAction(e.target.value)}
-              placeholder="다음에 할 일 (예: 샘플 회신 확인)"
-              className="w-full p-3 rounded-xl bg-gray-50 dark:bg-gray-900/50 border-2 border-transparent focus:border-primary/20 outline-none font-medium"
-            />
-          )}
         </section>
 
         <div className="pt-2">

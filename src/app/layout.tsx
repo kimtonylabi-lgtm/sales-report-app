@@ -30,9 +30,11 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="ko" className="h-full">
-      <body className={`${inter.className} antialiased bg-background text-foreground h-full overflow-x-hidden pb-20`}>
+      <body className={`${inter.className} antialiased bg-background text-foreground overflow-x-hidden`}>
         <AuthProvider>
-          <main className="max-w-md mx-auto min-h-screen relative px-4 pt-6">
+          {/* Bottom space lives on the content (not on a fixed-height body), so the last element always
+              scrolls clear of the fixed bottom nav: nav 4rem + gap + the phone's home-bar inset. */}
+          <main className="max-w-md mx-auto min-h-screen relative px-4 pt-6 pb-[calc(6rem+env(safe-area-inset-bottom))]">
             {children}
           </main>
           <BottomNav />

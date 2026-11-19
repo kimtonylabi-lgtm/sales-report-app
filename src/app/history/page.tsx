@@ -113,7 +113,7 @@ export default function HistoryPage() {
     }, [selectedClient, selectedManager]);
 
     return (
-        <div className="space-y-8 pb-20 animate-in fade-in slide-in-from-bottom-4 duration-500">
+        <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
             <header className="flex flex-col space-y-2">
                 <h1 className="text-3xl font-black text-gray-900 dark:text-white">고객사 히스토리</h1>
                 <p className="text-gray-500 font-medium">과거 활동 내역을 확인하세요</p>

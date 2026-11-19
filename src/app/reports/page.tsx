@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { format } from 'date-fns';
 import { ko } from 'date-fns/locale';
-import { FileText, Pencil, X, Send, Trash2, ChevronDown, CalendarClock } from 'lucide-react';
+import { FileText, Pencil, X, Send, Trash2, ChevronDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '@/components/AuthProvider';
@@ -18,8 +18,6 @@ type Report = {
     type: string;
     content: string;
     activity_at: string;
-    next_contact_on: string | null;
-    next_action: string | null;
     clients: { name: string } | null;
     profiles?: { name: string } | null;
 };
@@ -135,7 +133,7 @@ export default function MyReportsPage() {
     };
 
     return (
-        <div className="space-y-8 pb-24 animate-in fade-in slide-in-from-bottom-4 duration-500">
+        <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
             <header className="flex justify-between items-end">
                 <div>
                     <h1 className="text-3xl font-black text-gray-900 dark:text-white">
@@ -212,13 +210,6 @@ export default function MyReportsPage() {
                                     )}
                                 </div>
                                 <p className="text-sm text-gray-600 dark:text-gray-300 leading-relaxed line-clamp-2 pl-1">{report.content}</p>
-                                {report.next_contact_on && (
-                                    <div className="mt-3 flex items-center text-xs font-bold text-primary pl-1">
-                                        <CalendarClock size={12} className="mr-1" />
-                                        다음 연락 {format(new Date(`${report.next_contact_on}T00:00:00`), 'M/d(E)', { locale: ko })}
-                                        {report.next_action && <span className="ml-1 font-medium text-gray-500 truncate">· {report.next_action}</span>}
-                                    </div>
-                                )}
                             </motion.div>
                         );
                     })}

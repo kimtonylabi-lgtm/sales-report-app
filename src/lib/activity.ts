@@ -1,5 +1,4 @@
 import { MapPin, Phone, Mail, Users, Video, Clock, type LucideIcon } from 'lucide-react';
-import { format } from 'date-fns';
 
 /** Activity types — single source for labels, icons and colors (was copied into five files). */
 export const ACTIVITY_TYPES = [
@@ -17,6 +16,3 @@ const FALLBACK = { id: 'other', label: '기타', icon: Clock as LucideIcon, soli
 export function activityOf(type: string) {
     return ACTIVITY_TYPES.find((t) => t.id === type) ?? FALLBACK;
 }
-
-/** yyyy-MM-dd in the user's local time. */
-export const todayStr = () => format(new Date(), 'yyyy-MM-dd');

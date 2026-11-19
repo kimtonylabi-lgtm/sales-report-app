@@ -15,6 +15,7 @@ const DORMANT_PAGE = 50;
 
 /** CSV period choices: [label, start date or null for all time, end date or null for now]. */
 const EXPORT_PERIODS = [
+    { id: 'today', label: '오늘', range: () => [startOfDay(new Date()), null] as const },
     { id: 'thisMonth', label: '이번 달', range: () => [startOfMonth(new Date()), null] as const },
     { id: 'lastMonth', label: '지난달', range: () => [startOfMonth(subMonths(new Date(), 1)), startOfMonth(new Date())] as const },
     { id: 'last3', label: '최근 3개월', range: () => [startOfMonth(subMonths(new Date(), 2)), null] as const },
@@ -44,7 +45,7 @@ export default function LeaderDashboard() {
     const [dormantDays, setDormantDays] = useState<(typeof DORMANT_DAYS)[number]>(30);
     const [owner, setOwner] = useState<string>('all');
     const [shown, setShown] = useState(DORMANT_PAGE);
-    const [exportPeriod, setExportPeriod] = useState<(typeof EXPORT_PERIODS)[number]['id']>('thisMonth');
+    const [exportPeriod, setExportPeriod] = useState<(typeof EXPORT_PERIODS)[number]['id']>('today');
     const [isExporting, setIsExporting] = useState(false);
 
     const loadDashboard = useCallback(async () => {
@@ -103,7 +104,7 @@ export default function LeaderDashboard() {
             const [from, to] = period.range();
             let query = supabase
                 .from('reports')
-                .select('activity_at, type, content, next_contact_on, next_action, clients (name), profiles (name)')
+                .select('activity_at, type, content, clients (name), profiles (name)')
                 .order('activity_at', { ascending: false });
             if (from) query = query.gte('activity_at', from.toISOString());
             if (to) query = query.lt('activity_at', to.toISOString());
@@ -115,15 +116,13 @@ export default function LeaderDashboard() {
                 return;
             }
 
-            const headers = ['날짜', '작성자', '고객사', '활동종류', '보고내용', '다음 연락일', '다음 할 일'];
+            const headers = ['날짜', '작성자', '고객사', '활동종류', '보고내용'];
             const rows = reports.map((r) => [
                 format(new Date(r.activity_at), 'yyyy-MM-dd HH:mm'),
                 (r.profiles as unknown as { name: string } | null)?.name || '알수없음',
                 (r.clients as unknown as { name: string } | null)?.name || '알수없음',
                 activityOf(r.type).label,
                 r.content,
-                r.next_contact_on ?? '',
-                r.next_action ?? '',
             ]);
             const csvContent = '﻿' + [headers, ...rows].map((row) => row.map(csvCell).join(',')).join('\r\n');
 
@@ -172,7 +171,7 @@ export default function LeaderDashboard() {
     const maxCount = Math.max(...weeklyStats.map((s) => s.count), 5); // Minimum scale of 5
 
     return (
-        <div className="space-y-8 pb-20">
+        <div className="space-y-8">
             <header>
                 <h1 className="text-2xl font-bold">관리자 대시보드</h1>
                 <p className="text-gray-500">팀 활동 현황 및 휴면 고객 관리</p>
