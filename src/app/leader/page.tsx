@@ -1,20 +1,78 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase';
-import { format, subDays, startOfDay, differenceInDays } from 'date-fns';
+import { format, subDays, startOfDay, startOfMonth, subMonths, differenceInDays } from 'date-fns';
 import { ko } from 'date-fns/locale';
-import { AlertCircle, TrendingUp, Users, Calendar, Download, Lock, BarChart3 } from 'lucide-react';
+import { AlertCircle, TrendingUp, Users, Calendar, Download, Lock, BarChart3, ChevronDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/components/AuthProvider';
+import { activityOf } from '@/lib/activity';
+
+/** Dormant thresholds offered to the leader (days since the last touch). */
+const DORMANT_DAYS = [30, 60, 90] as const;
+const DORMANT_PAGE = 50;
+
+/** CSV period choices: [label, start date or null for all time, end date or null for now]. */
+const EXPORT_PERIODS = [
+    { id: 'thisMonth', label: '이번 달', range: () => [startOfMonth(new Date()), null] as const },
+    { id: 'lastMonth', label: '지난달', range: () => [startOfMonth(subMonths(new Date(), 1)), startOfMonth(new Date())] as const },
+    { id: 'last3', label: '최근 3개월', range: () => [startOfMonth(subMonths(new Date(), 2)), null] as const },
+    { id: 'all', label: '전체', range: () => [null, null] as const },
+] as const;
+
+/** One row of the client_touch_summary view (supabase_features_2026-11.sql). */
+type TouchSummary = {
+    client_id: string;
+    name: string;
+    last_visited_at: string;
+    report_count: number;
+    last_user_id: string | null;
+};
+type Manager = { id: string; name: string };
+
+/** Quote every CSV field so commas, quotes and line breaks inside names or content stay in one cell. */
+const csvCell = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
 
 export default function LeaderDashboard() {
     const { profile, loading: authLoading } = useAuth();
     const [stats, setStats] = useState({ today: 0, total: 0 });
-    const [dormantClients, setDormantClients] = useState<any[]>([]);
-    const [weeklyStats, setWeeklyStats] = useState<{ date: string, count: number, label: string }[]>([]);
+    const [summary, setSummary] = useState<TouchSummary[]>([]);
+    const [managers, setManagers] = useState<Manager[]>([]);
+    const [weeklyStats, setWeeklyStats] = useState<{ date: string; count: number; label: string }[]>([]);
     const [loading, setLoading] = useState(true);
+    const [dormantDays, setDormantDays] = useState<(typeof DORMANT_DAYS)[number]>(30);
+    const [owner, setOwner] = useState<string>('all');
+    const [shown, setShown] = useState(DORMANT_PAGE);
+    const [exportPeriod, setExportPeriod] = useState<(typeof EXPORT_PERIODS)[number]['id']>('thisMonth');
     const [isExporting, setIsExporting] = useState(false);
+
+    const loadDashboard = useCallback(async () => {
+        setLoading(true);
+        const today = startOfDay(new Date());
+        const weekStart = subDays(today, 6);
+
+        const [todayRes, totalRes, summaryRes, weekRes, managersRes] = await Promise.all([
+            supabase.from('reports').select('*', { count: 'exact', head: true }).gte('created_at', today.toISOString()),
+            supabase.from('reports').select('*', { count: 'exact', head: true }),
+            supabase.from('client_touch_summary').select('*'),
+            supabase.from('reports').select('activity_at').gte('activity_at', weekStart.toISOString()),
+            supabase.from('profiles').select('id, name').order('name'),
+        ]);
+
+        const dayStats = Array.from({ length: 7 }).map((_, i) => {
+            const date = subDays(today, 6 - i);
+            const dateStr = format(date, 'yyyy-MM-dd');
+            const count = (weekRes.data ?? []).filter((r) => format(new Date(r.activity_at), 'yyyy-MM-dd') === dateStr).length;
+            return { date: dateStr, count, label: format(date, 'E', { locale: ko }) };
+        });
+
+        setStats({ today: todayRes.count ?? 0, total: totalRes.count ?? 0 });
+        setSummary((summaryRes.data ?? []) as TouchSummary[]);
+        setManagers(managersRes.data ?? []);
+        setWeeklyStats(dayStats);
+        setLoading(false);
+    }, []);
 
     useEffect(() => {
         if (!authLoading && profile?.role === 'leader') {
@@ -22,110 +80,64 @@ export default function LeaderDashboard() {
         } else if (!authLoading) {
             setLoading(false);
         }
-    }, [profile, authLoading]);
+    }, [profile, authLoading, loadDashboard]);
 
-    const loadDashboard = async () => {
-        setLoading(true);
+    const managerName = useMemo(() => new Map(managers.map((m) => [m.id, m.name])), [managers]);
 
-        // 1. Get today's report count
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-
-        const { count: todayCount } = await supabase
-            .from('reports')
-            .select('*', { count: 'exact', head: true })
-            .gte('created_at', today.toISOString());
-
-        // 2. Get total reports
-        const { count: totalCount } = await supabase
-            .from('reports')
-            .select('*', { count: 'exact', head: true });
-
-        // 3. Get dormant clients (touched before, but not in the last 14 days).
-        // Never-touched clients are excluded: hundreds were pre-registered from the order index
-        // and would flood the list before anyone has contacted them.
-        const fourteenDaysAgo = new Date();
-        fourteenDaysAgo.setDate(fourteenDaysAgo.getDate() - 14);
-
-        const { data: clients } = await supabase
-            .from('clients')
-            .select('*')
-            .lt('last_visited_at', fourteenDaysAgo.toISOString())
-            .order('last_visited_at', { ascending: true });
-
-        // 4. Get Weekly Stats (Last 7 days)
-        const weekStart = subDays(startOfDay(new Date()), 6);
-        const { data: weekReports } = await supabase
-            .from('reports')
-            .select('created_at')
-            .gte('created_at', weekStart.toISOString());
-
-        const dayStats = Array.from({ length: 7 }).map((_, i) => {
-            const date = subDays(today, 6 - i);
-            const dateStr = format(date, 'yyyy-MM-dd');
-            const dayReports = weekReports?.filter(r =>
-                format(new Date(r.created_at), 'yyyy-MM-dd') === dateStr
-            ).length || 0;
-
-            return {
-                date: dateStr,
-                count: dayReports,
-                label: format(date, 'E', { locale: ko }) // Mon, Tue, etc. in Korean
-            };
-        });
-
-        setStats({ today: todayCount || 0, total: totalCount || 0 });
-        setDormantClients(clients || []);
-        setWeeklyStats(dayStats);
-        setLoading(false);
-    };
+    /**
+     * Dormant = touched before, but not within the chosen days. The client's last reporter is its
+     * owner (no manual assignment). Clients with more past reports — the real accounts — come first.
+     */
+    const dormant = useMemo(() => {
+        const cutoff = subDays(new Date(), dormantDays).getTime();
+        return summary
+            .filter((s) => new Date(s.last_visited_at).getTime() < cutoff)
+            .filter((s) => owner === 'all' || s.last_user_id === owner)
+            .sort((a, b) => b.report_count - a.report_count || a.last_visited_at.localeCompare(b.last_visited_at));
+    }, [summary, dormantDays, owner]);
 
     const handleExport = async () => {
         setIsExporting(true);
         try {
-            const { data: reports, error } = await supabase
+            const period = EXPORT_PERIODS.find((p) => p.id === exportPeriod)!;
+            const [from, to] = period.range();
+            let query = supabase
                 .from('reports')
-                .select(`
-                    created_at,
-                    type,
-                    content,
-                    clients (name),
-                    profiles (name)
-                `)
-                .order('created_at', { ascending: false });
+                .select('activity_at, type, content, next_contact_on, next_action, clients (name), profiles (name)')
+                .order('activity_at', { ascending: false });
+            if (from) query = query.gte('activity_at', from.toISOString());
+            if (to) query = query.lt('activity_at', to.toISOString());
+            const { data: reports, error } = await query;
 
             if (error) throw error;
-
             if (!reports || reports.length === 0) {
-                alert('다운로드할 데이터가 없습니다.');
+                alert('선택한 기간에 다운로드할 데이터가 없습니다.');
                 return;
             }
 
-            // CSV Creation
-            const headers = ['날짜', '작성자', '고객사', '활동종류', '보고내용'];
-            const rows = reports.map(r => [
-                format(new Date(r.created_at), 'yyyy-MM-dd HH:mm'),
-                (r.profiles as any)?.name || '알수없음',
-                (r.clients as any)?.name || '알수없음',
-                r.type === 'visit' ? '방문' : r.type === 'phone' ? '전화' : r.type === 'offline_meeting' ? '오프라인 미팅' : r.type === 'video_meeting' ? '화상미팅' : '메일',
-                `"${r.content.replace(/"/g, '""')}"` // Escape quotes for CSV
+            const headers = ['날짜', '작성자', '고객사', '활동종류', '보고내용', '다음 연락일', '다음 할 일'];
+            const rows = reports.map((r) => [
+                format(new Date(r.activity_at), 'yyyy-MM-dd HH:mm'),
+                (r.profiles as unknown as { name: string } | null)?.name || '알수없음',
+                (r.clients as unknown as { name: string } | null)?.name || '알수없음',
+                activityOf(r.type).label,
+                r.content,
+                r.next_contact_on ?? '',
+                r.next_action ?? '',
             ]);
-
-            const csvContent = [
-                '\uFEFF' + headers.join(','), // BOM for Korean characters
-                ...rows.map(row => row.join(','))
-            ].join('\n');
+            const csvContent = '﻿' + [headers, ...rows].map((row) => row.map(csvCell).join(',')).join('\r\n');
 
             const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
             const url = URL.createObjectURL(blob);
             const link = document.createElement('a');
             link.setAttribute('href', url);
-            link.setAttribute('download', `영업보고현황_${format(new Date(), 'yyyyMMdd')}.csv`);
+            link.setAttribute('download', `영업보고현황_${period.label.replace(/\s/g, '')}_${format(new Date(), 'yyyyMMdd')}.csv`);
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
-        } catch (error: any) {
-            alert('다운로드 중 오류가 발생했습니다: ' + error.message);
+            URL.revokeObjectURL(url);
+        } catch (error) {
+            alert('다운로드 중 오류가 발생했습니다: ' + (error instanceof Error ? error.message : String(error)));
         } finally {
             setIsExporting(false);
         }
@@ -157,23 +169,13 @@ export default function LeaderDashboard() {
         );
     }
 
-    const maxCount = Math.max(...weeklyStats.map(s => s.count), 5); // Minimum scale of 5
+    const maxCount = Math.max(...weeklyStats.map((s) => s.count), 5); // Minimum scale of 5
 
     return (
         <div className="space-y-8 pb-20">
-            <header className="flex justify-between items-start">
-                <div>
-                    <h1 className="text-2xl font-bold">관리자 대시보드</h1>
-                    <p className="text-gray-500">팀 활동 현황 및 휴면 고객 관리</p>
-                </div>
-                <button
-                    onClick={handleExport}
-                    disabled={isExporting}
-                    className="flex items-center space-x-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 px-4 py-2 rounded-xl text-sm font-bold text-gray-700 dark:text-gray-200 shadow-sm active:scale-95 transition-all disabled:opacity-50"
-                >
-                    <Download size={18} />
-                    <span>{isExporting ? '받는 중...' : '엑셀 다운로드'}</span>
-                </button>
+            <header>
+                <h1 className="text-2xl font-bold">관리자 대시보드</h1>
+                <p className="text-gray-500">팀 활동 현황 및 휴면 고객 관리</p>
             </header>
 
             {/* Stats Cards */}
@@ -200,6 +202,37 @@ export default function LeaderDashboard() {
                 </div>
             </div>
 
+            {/* Export */}
+            <section className="bg-white dark:bg-gray-800 p-5 rounded-3xl shadow-sm border border-gray-100 dark:border-gray-700 space-y-3">
+                <div className="flex items-center justify-between">
+                    <h2 className="text-sm font-bold flex items-center">
+                        <Download size={16} className="mr-2 text-primary" />
+                        엑셀 다운로드
+                    </h2>
+                    <button
+                        onClick={handleExport}
+                        disabled={isExporting}
+                        className="bg-primary text-white px-4 py-2 rounded-xl text-sm font-bold shadow-sm active:scale-95 transition-all disabled:opacity-50"
+                    >
+                        {isExporting ? '받는 중...' : '받기'}
+                    </button>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                    {EXPORT_PERIODS.map((p) => (
+                        <button
+                            key={p.id}
+                            onClick={() => setExportPeriod(p.id)}
+                            className={cn(
+                                'px-3 py-1.5 rounded-xl text-xs font-bold transition-all',
+                                exportPeriod === p.id ? 'bg-primary/10 text-primary ring-1 ring-primary/30' : 'bg-gray-50 dark:bg-gray-900/50 text-gray-500'
+                            )}
+                        >
+                            {p.label}
+                        </button>
+                    ))}
+                </div>
+            </section>
+
             {/* Weekly Chart */}
             <section className="bg-white dark:bg-gray-800 p-6 rounded-3xl shadow-sm border border-gray-100 dark:border-gray-700">
                 <div className="flex items-center mb-6">
@@ -207,8 +240,8 @@ export default function LeaderDashboard() {
                     <h2 className="text-lg font-bold">주간 활동 추이</h2>
                 </div>
                 <div className="flex items-end justify-between h-40 space-x-3">
-                    {weeklyStats.map((stat, idx) => (
-                        <div key={idx} className="flex flex-col items-center flex-1 group">
+                    {weeklyStats.map((stat) => (
+                        <div key={stat.date} className="flex flex-col items-center flex-1 group">
                             <div className="relative w-full flex items-end justify-center h-32 bg-gray-50 dark:bg-gray-900 rounded-t-xl overflow-hidden">
                                 <div
                                     className="w-full bg-primary/80 group-hover:bg-primary transition-all duration-500 rounded-t-lg mx-1"
@@ -230,37 +263,77 @@ export default function LeaderDashboard() {
                 <div className="flex items-center justify-between">
                     <h2 className="flex items-center text-lg font-bold text-red-600 dark:text-red-400">
                         <AlertCircle size={20} className="mr-2" />
-                        휴면 고객사 (14일+)
+                        휴면 고객사
                     </h2>
                     <span className="text-xs font-bold bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 px-2.5 py-1 rounded-full">
-                        {dormantClients.length}
+                        {dormant.length}
                     </span>
                 </div>
 
+                <div className="flex gap-2">
+                    {DORMANT_DAYS.map((d) => (
+                        <button
+                            key={d}
+                            onClick={() => {
+                                setDormantDays(d);
+                                setShown(DORMANT_PAGE);
+                            }}
+                            className={cn(
+                                'flex-1 py-2 rounded-xl text-sm font-bold transition-all',
+                                dormantDays === d ? 'bg-red-500 text-white shadow-sm' : 'bg-white dark:bg-gray-800 text-gray-500 border border-gray-100 dark:border-gray-700'
+                            )}
+                        >
+                            {d}일+
+                        </button>
+                    ))}
+                </div>
+
+                <div className="relative group">
+                    <select
+                        value={owner}
+                        onChange={(e) => {
+                            setOwner(e.target.value);
+                            setShown(DORMANT_PAGE);
+                        }}
+                        className="w-full bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-2xl pl-5 pr-10 py-3 text-sm font-bold appearance-none focus:outline-none focus:ring-2 focus:ring-primary/30 shadow-sm cursor-pointer"
+                    >
+                        <option value="all">전체 담당자</option>
+                        {managers.map((m) => (
+                            <option key={m.id} value={m.id}>{m.name}</option>
+                        ))}
+                    </select>
+                    <ChevronDown className="absolute right-5 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" size={18} />
+                </div>
+                <p className="text-[11px] text-gray-400 px-1">담당자 = 마지막으로 보고를 쓴 사람. 보고가 많았던 거래처가 위에 옵니다.</p>
+
                 {loading ? (
                     <div className="flex justify-center py-10 text-gray-400">데이터 불러오는 중...</div>
-                ) : dormantClients.length > 0 ? (
+                ) : dormant.length > 0 ? (
                     <div className="space-y-3">
-                        {dormantClients.map((client) => {
-                            const days = client.last_visited_at
-                                ? differenceInDays(new Date(), new Date(client.last_visited_at))
-                                : '미기록';
-                            return (
-                                <div key={client.id} className="flex items-center justify-between bg-white dark:bg-gray-800 p-4 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700">
-                                    <div>
-                                        <div className="font-bold text-gray-800 dark:text-gray-100">{client.name}</div>
-                                        <div className="text-[10px] text-gray-400 flex items-center mt-1">
-                                            <Calendar size={10} className="mr-1" />
-                                            마지막 방문: {client.last_visited_at ? format(new Date(client.last_visited_at), 'yyyy.MM.dd') : '없음'}
-                                        </div>
-                                    </div>
-                                    <div className="text-right">
-                                        <div className="text-xs font-black text-red-500">{days}일 경과</div>
-                                        <div className="text-[10px] text-gray-400">터치 필요</div>
+                        {dormant.slice(0, shown).map((client) => (
+                            <div key={client.client_id} className="flex items-center justify-between bg-white dark:bg-gray-800 p-4 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700">
+                                <div className="min-w-0">
+                                    <div className="font-bold text-gray-800 dark:text-gray-100 truncate">{client.name}</div>
+                                    <div className="text-[10px] text-gray-400 flex items-center mt-1">
+                                        <Calendar size={10} className="mr-1 shrink-0" />
+                                        마지막 {format(new Date(client.last_visited_at), 'yyyy.MM.dd')} · 보고 {client.report_count}건
+                                        {client.last_user_id && managerName.get(client.last_user_id) && ` · ${managerName.get(client.last_user_id)}`}
                                     </div>
                                 </div>
-                            );
-                        })}
+                                <div className="text-right shrink-0 ml-3">
+                                    <div className="text-xs font-black text-red-500">{differenceInDays(new Date(), new Date(client.last_visited_at))}일 경과</div>
+                                    <div className="text-[10px] text-gray-400">터치 필요</div>
+                                </div>
+                            </div>
+                        ))}
+                        {dormant.length > shown && (
+                            <button
+                                onClick={() => setShown((n) => n + DORMANT_PAGE)}
+                                className="w-full py-3 rounded-2xl bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 text-sm font-bold text-gray-600 dark:text-gray-300"
+                            >
+                                더 보기 ({shown} / {dormant.length})
+                            </button>
+                        )}
                     </div>
                 ) : (
                     <div className="text-center py-10 bg-green-50 dark:bg-green-900/10 rounded-3xl text-green-600 text-sm font-medium">

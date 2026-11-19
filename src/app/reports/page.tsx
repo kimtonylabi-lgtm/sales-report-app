@@ -1,76 +1,90 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { format } from 'date-fns';
 import { ko } from 'date-fns/locale';
-import { MapPin, Phone, Mail, FileText, Pencil, X, Send, Trash2, ChevronDown, Users, Video } from 'lucide-react';
+import { FileText, Pencil, X, Send, Trash2, ChevronDown, CalendarClock } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '@/components/AuthProvider';
+import { ACTIVITY_TYPES, activityOf } from '@/lib/activity';
+
+const PAGE_SIZE = 50;
+
+type Report = {
+    id: string;
+    user_id: string;
+    type: string;
+    content: string;
+    activity_at: string;
+    next_contact_on: string | null;
+    next_action: string | null;
+    clients: { name: string } | null;
+    profiles?: { name: string } | null;
+};
+type Manager = { id: string; name: string };
 
 export default function MyReportsPage() {
     const { user, profile, loading: authLoading } = useAuth();
-    const [reports, setReports] = useState<any[]>([]);
+    const isLeader = profile?.role === 'leader';
+    const [reports, setReports] = useState<Report[]>([]);
+    const [total, setTotal] = useState(0);
     const [loading, setLoading] = useState(true);
-    const [editingReport, setEditingReport] = useState<any>(null);
+    const [loadingMore, setLoadingMore] = useState(false);
+    const [editingReport, setEditingReport] = useState<Report | null>(null);
     const [isUpdating, setIsUpdating] = useState(false);
     const [isDeleting, setIsDeleting] = useState(false);
-    const [managers, setManagers] = useState<any[]>([]);
+    const [managers, setManagers] = useState<Manager[]>([]);
     const [selectedManager, setSelectedManager] = useState<string>('all');
 
+    /** One page of reports, newest activity first. Leaders see everyone (RLS), others only their own. */
+    const fetchPage = useCallback(
+        async (from: number) => {
+            let query = supabase
+                .from('reports')
+                .select(isLeader ? '*, clients(name), profiles(name)' : '*, clients(name)', { count: 'exact' })
+                .order('activity_at', { ascending: false })
+                .range(from, from + PAGE_SIZE - 1);
+            if (!isLeader && user) query = query.eq('user_id', user.id);
+            if (isLeader && selectedManager !== 'all') query = query.eq('user_id', selectedManager);
+            const { data, count } = await query;
+            return { rows: (data ?? []) as unknown as Report[], count: count ?? 0 };
+        },
+        [isLeader, user, selectedManager]
+    );
+
+    const reload = useCallback(async () => {
+        setLoading(true);
+        const { rows, count } = await fetchPage(0);
+        setReports(rows);
+        setTotal(count);
+        setLoading(false);
+    }, [fetchPage]);
+
     useEffect(() => {
-        if (!authLoading && user) {
-            loadInitialData();
-        } else if (!authLoading && !user) {
+        if (authLoading) return;
+        if (!user) {
             setLoading(false);
+            return;
         }
-    }, [user, authLoading, profile, selectedManager]);
+        reload();
+    }, [authLoading, user, reload]);
 
-    const loadInitialData = async () => {
-        if (profile?.role === 'leader') {
-            await loadManagers();
-            await loadAllReports();
-        } else {
-            await loadMyReports();
-        }
-    };
-
-    const loadManagers = async () => {
-        const { data } = await supabase
+    useEffect(() => {
+        if (!isLeader) return;
+        supabase
             .from('profiles')
-            .select('*')
-            .order('name');
-        setManagers(data || []);
-    };
+            .select('id, name')
+            .order('name')
+            .then(({ data }) => setManagers(data ?? []));
+    }, [isLeader]);
 
-    const loadAllReports = async () => {
-        setLoading(true);
-        let query = supabase
-            .from('reports')
-            .select('*, clients(name), profiles(name)')
-            .order('created_at', { ascending: false });
-
-        if (selectedManager !== 'all') {
-            query = query.eq('user_id', selectedManager);
-        }
-
-        const { data } = await query;
-        setReports(data || []);
-        setLoading(false);
-    };
-
-    const loadMyReports = async () => {
-        if (!user) return;
-        setLoading(true);
-        const { data } = await supabase
-            .from('reports')
-            .select('*, clients(name)')
-            .eq('user_id', user.id)
-            .order('created_at', { ascending: false });
-
-        setReports(data || []);
-        setLoading(false);
+    const loadMore = async () => {
+        setLoadingMore(true);
+        const { rows } = await fetchPage(reports.length);
+        setReports((prev) => [...prev, ...rows]);
+        setLoadingMore(false);
     };
 
     const handleUpdate = async () => {
@@ -82,7 +96,7 @@ export default function MyReportsPage() {
                 .from('reports')
                 .update({
                     type: editingReport.type,
-                    content: editingReport.content
+                    content: editingReport.content,
                 })
                 .eq('id', editingReport.id);
 
@@ -90,9 +104,9 @@ export default function MyReportsPage() {
 
             alert('보고서가 수정되었습니다.');
             setEditingReport(null);
-            loadInitialData();
-        } catch (error: any) {
-            alert('수정 실패: ' + error.message);
+            reload();
+        } catch (error) {
+            alert('수정 실패: ' + (error instanceof Error ? error.message : String(error)));
         } finally {
             setIsUpdating(false);
         }
@@ -112,9 +126,9 @@ export default function MyReportsPage() {
             if (error) throw error;
 
             setEditingReport(null);
-            loadInitialData();
-        } catch (error: any) {
-            alert('삭제 실패: ' + error.message);
+            reload();
+        } catch (error) {
+            alert('삭제 실패: ' + (error instanceof Error ? error.message : String(error)));
         } finally {
             setIsDeleting(false);
         }
@@ -125,20 +139,18 @@ export default function MyReportsPage() {
             <header className="flex justify-between items-end">
                 <div>
                     <h1 className="text-3xl font-black text-gray-900 dark:text-white">
-                        {profile?.role === 'leader' ? '전체 보고 목록' : '내 보고 목록'}
+                        {isLeader ? '전체 보고 목록' : '내 보고 목록'}
                     </h1>
                     <p className="text-gray-500 font-medium mt-1">
-                        {profile?.role === 'leader'
-                            ? '담당자별 업무 성과를 확인하세요'
-                            : '내가 작성한 성과를 확인하세요'}
+                        {isLeader ? '담당자별 업무 성과를 확인하세요' : '내가 작성한 성과를 확인하세요'}
                     </p>
                 </div>
                 <div className="text-xs bg-primary/10 text-primary px-4 py-2 rounded-full font-bold">
-                    총 {reports.length}건
+                    총 {total}건
                 </div>
             </header>
 
-            {profile?.role === 'leader' && (
+            {isLeader && (
                 <div className="relative group">
                     <select
                         value={selectedManager}
@@ -160,56 +172,65 @@ export default function MyReportsPage() {
                 </div>
             ) : reports.length > 0 ? (
                 <div className="space-y-4">
-                    {reports.map((report, idx) => (
-                        <motion.div
-                            initial={{ opacity: 0, y: 20 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            transition={{ delay: idx * 0.05 }}
-                            key={report.id}
-                            className="group relative bg-white dark:bg-gray-800 p-6 rounded-[2rem] shadow-sm border border-gray-100 dark:border-gray-700 hover:shadow-lg transition-all"
-                        >
-                            <button
-                                onClick={() => setEditingReport({ ...report })}
-                                className="absolute top-5 right-5 p-2 opacity-0 group-hover:opacity-100 bg-gray-50 dark:bg-gray-700/50 rounded-full text-gray-400 hover:text-primary hover:bg-primary/10 transition-all"
+                    {reports.map((report, idx) => {
+                        const t = activityOf(report.type);
+                        const Icon = t.icon;
+                        return (
+                            <motion.div
+                                initial={{ opacity: 0, y: 20 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                transition={{ delay: Math.min(idx % PAGE_SIZE, 10) * 0.05 }}
+                                key={report.id}
+                                className="group relative bg-white dark:bg-gray-800 p-6 rounded-[2rem] shadow-sm border border-gray-100 dark:border-gray-700 hover:shadow-lg transition-all"
                             >
-                                <Pencil size={16} />
-                            </button>
-                            <div className="flex justify-between items-start mb-4">
-                                <div className="flex items-center space-x-3">
-                                    <div className={cn(
-                                        "p-3 rounded-2xl",
-                                        report.type === 'visit' ? "bg-blue-50 text-blue-500" :
-                                            report.type === 'phone' ? "bg-green-50 text-green-500" :
-                                                report.type === 'offline_meeting' ? "bg-orange-50 text-orange-500" :
-                                                    report.type === 'video_meeting' ? "bg-teal-50 text-teal-500" :
-                                                        "bg-purple-50 text-purple-500"
-                                    )}>
-                                        {report.type === 'visit' && <MapPin size={20} />}
-                                        {report.type === 'phone' && <Phone size={20} />}
-                                        {report.type === 'email' && <Mail size={20} />}
-                                        {report.type === 'offline_meeting' && <Users size={20} />}
-                                        {report.type === 'video_meeting' && <Video size={20} />}
-                                    </div>
-                                    <div>
-                                        <h3 className="font-bold text-lg text-gray-900 dark:text-gray-100">{report.clients?.name}</h3>
-                                        <div className="flex items-center space-x-2 text-xs font-medium text-gray-400 mt-0.5">
-                                            <span>
-                                                {report.type === 'visit' ? '방문' : report.type === 'phone' ? '전화' : report.type === 'offline_meeting' ? '오프라인 미팅' : report.type === 'video_meeting' ? '화상미팅' : '메일'}
-                                            </span>
-                                            <span className="w-1 h-1 bg-gray-300 rounded-full" />
-                                            <span>{format(new Date(report.created_at), 'MM/dd HH:mm', { locale: ko })}</span>
+                                <button
+                                    onClick={() => setEditingReport({ ...report })}
+                                    aria-label="보고서 수정"
+                                    // Always visible on phones (no hover there); hover-reveal only on desktop.
+                                    className="absolute top-5 right-5 p-2 opacity-100 md:opacity-0 md:group-hover:opacity-100 bg-gray-50 dark:bg-gray-700/50 rounded-full text-gray-400 hover:text-primary hover:bg-primary/10 transition-all"
+                                >
+                                    <Pencil size={16} />
+                                </button>
+                                <div className="flex justify-between items-start mb-4">
+                                    <div className="flex items-center space-x-3">
+                                        <div className={cn('p-3 rounded-2xl', t.soft)}>
+                                            <Icon size={20} />
+                                        </div>
+                                        <div>
+                                            <h3 className="font-bold text-lg text-gray-900 dark:text-gray-100 pr-10">{report.clients?.name}</h3>
+                                            <div className="flex items-center space-x-2 text-xs font-medium text-gray-400 mt-0.5">
+                                                <span>{t.label}</span>
+                                                <span className="w-1 h-1 bg-gray-300 rounded-full" />
+                                                <span>{format(new Date(report.activity_at), 'MM/dd HH:mm', { locale: ko })}</span>
+                                            </div>
                                         </div>
                                     </div>
+                                    {isLeader && (
+                                        <span className="text-xs font-bold text-primary bg-primary/5 px-2 py-1 rounded-lg mt-1 mr-10 shrink-0">
+                                            {report.profiles?.name}
+                                        </span>
+                                    )}
                                 </div>
-                                {profile?.role === 'leader' && (
-                                    <span className="text-xs font-bold text-primary bg-primary/5 px-2 py-1 rounded-lg mt-1 mr-8 group-hover:mr-0 transition-all">
-                                        {report.profiles?.name}
-                                    </span>
+                                <p className="text-sm text-gray-600 dark:text-gray-300 leading-relaxed line-clamp-2 pl-1">{report.content}</p>
+                                {report.next_contact_on && (
+                                    <div className="mt-3 flex items-center text-xs font-bold text-primary pl-1">
+                                        <CalendarClock size={12} className="mr-1" />
+                                        다음 연락 {format(new Date(`${report.next_contact_on}T00:00:00`), 'M/d(E)', { locale: ko })}
+                                        {report.next_action && <span className="ml-1 font-medium text-gray-500 truncate">· {report.next_action}</span>}
+                                    </div>
                                 )}
-                            </div>
-                            <p className="text-sm text-gray-600 dark:text-gray-300 leading-relaxed line-clamp-2 pl-1">{report.content}</p>
-                        </motion.div>
-                    ))}
+                            </motion.div>
+                        );
+                    })}
+                    {reports.length < total && (
+                        <button
+                            onClick={loadMore}
+                            disabled={loadingMore}
+                            className="w-full py-4 rounded-2xl bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 text-sm font-bold text-gray-600 dark:text-gray-300 active:scale-[0.99] transition-all disabled:opacity-50"
+                        >
+                            {loadingMore ? '불러오는 중...' : `더 보기 (${reports.length} / ${total})`}
+                        </button>
+                    )}
                 </div>
             ) : (
                 <div className="text-center py-32 space-y-4">
@@ -236,11 +257,12 @@ export default function MyReportsPage() {
                                     <button
                                         onClick={handleDelete}
                                         disabled={isDeleting || isUpdating}
+                                        aria-label="보고서 삭제"
                                         className="p-3 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-2xl transition-colors disabled:opacity-50"
                                     >
                                         <Trash2 size={20} />
                                     </button>
-                                    <button onClick={() => setEditingReport(null)} className="p-3 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-2xl transition-colors text-gray-500">
+                                    <button onClick={() => setEditingReport(null)} aria-label="닫기" className="p-3 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-2xl transition-colors text-gray-500">
                                         <X size={20} />
                                     </button>
                                 </div>
@@ -250,13 +272,7 @@ export default function MyReportsPage() {
                                 <div className="space-y-2">
                                     <label className="text-xs font-bold text-gray-400 uppercase tracking-wider ml-1">활동 종류</label>
                                     <div className="grid grid-cols-3 gap-3">
-                                        {[
-                                            { id: 'visit', label: '방문', icon: MapPin },
-                                            { id: 'phone', label: '전화', icon: Phone },
-                                            { id: 'email', label: '메일', icon: Mail },
-                                            { id: 'offline_meeting', label: '오프라인 미팅', icon: Users },
-                                            { id: 'video_meeting', label: '화상미팅', icon: Video },
-                                        ].map((t) => {
+                                        {ACTIVITY_TYPES.map((t) => {
                                             const Icon = t.icon;
                                             const isSelected = editingReport.type === t.id;
                                             return (
@@ -264,13 +280,13 @@ export default function MyReportsPage() {
                                                     key={t.id}
                                                     onClick={() => setEditingReport({ ...editingReport, type: t.id })}
                                                     className={cn(
-                                                        "flex flex-col items-center justify-center p-4 rounded-2xl transition-all border-2",
+                                                        'flex flex-col items-center justify-center p-4 rounded-2xl transition-all border-2',
                                                         isSelected
-                                                            ? "border-primary bg-primary/5 text-primary shadow-sm"
-                                                            : "border-transparent bg-gray-50 dark:bg-gray-800 text-gray-400"
+                                                            ? 'border-primary bg-primary/5 text-primary shadow-sm'
+                                                            : 'border-transparent bg-gray-50 dark:bg-gray-800 text-gray-400'
                                                     )}
                                                 >
-                                                    <Icon size={20} className={cn("mb-1 transition-transform", isSelected && "scale-110")} />
+                                                    <Icon size={20} className={cn('mb-1 transition-transform', isSelected && 'scale-110')} />
                                                     <span className="text-xs font-bold">{t.label}</span>
                                                 </button>
                                             );
@@ -309,5 +325,4 @@ export default function MyReportsPage() {
             </AnimatePresence>
         </div>
     );
-
 }

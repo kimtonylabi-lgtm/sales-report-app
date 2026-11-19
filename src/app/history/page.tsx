@@ -5,100 +5,112 @@ import { supabase } from '@/lib/supabase';
 import { ClientSearch } from '@/components/ClientSearch';
 import { format } from 'date-fns';
 import { ko } from 'date-fns/locale';
-import { MapPin, Phone, Mail, Clock, ChevronDown, Check, User, Users, Video } from 'lucide-react';
+import { Clock, ChevronDown, Check, User } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/components/AuthProvider';
 import { motion } from 'framer-motion';
+import { activityOf } from '@/lib/activity';
+
+type HistoryReport = {
+    id: string;
+    type: string;
+    content: string;
+    activity_at: string;
+    profiles: { name: string } | null;
+    clients?: { name: string } | null;
+};
+type Manager = { id: string; name: string };
+
+function Timeline({ reports, showClient, dateFormat }: { reports: HistoryReport[]; showClient: boolean; dateFormat: string }) {
+    return (
+        <div className="relative pl-8 space-y-10 before:content-[''] before:absolute before:left-[15px] before:top-4 before:bottom-0 before:w-0.5 before:bg-gray-200 dark:before:bg-gray-700">
+            {reports.map((report, idx) => {
+                const t = activityOf(report.type);
+                const Icon = t.icon;
+                return (
+                    <motion.div
+                        initial={{ opacity: 0, x: -20 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        transition={{ delay: Math.min(idx, 10) * 0.05 }}
+                        key={report.id}
+                        className="relative"
+                    >
+                        <div className={cn(
+                            'absolute -left-[43px] top-0 w-8 h-8 rounded-full flex items-center justify-center text-white border-[3px] border-white dark:border-gray-900 shadow-lg z-10',
+                            t.dot
+                        )}>
+                            <Icon size={14} />
+                        </div>
+                        <div className="bg-white dark:bg-gray-800 p-6 rounded-[1.5rem] shadow-sm border border-gray-100 dark:border-gray-700 card-premium hover:scale-[1.01] transition-transform">
+                            <div className="flex justify-between items-start mb-3">
+                                <div className="flex flex-col">
+                                    {showClient && (
+                                        <span className="text-sm font-bold text-gray-800 dark:text-gray-100 mb-1">{report.clients?.name}</span>
+                                    )}
+                                    <span className={cn('text-xs font-bold uppercase tracking-wider w-fit px-2 py-0.5 rounded-md', t.soft)}>
+                                        {t.label}
+                                    </span>
+                                </div>
+                                <span className="text-xs font-bold text-gray-400">
+                                    {format(new Date(report.activity_at), dateFormat, { locale: ko })}
+                                </span>
+                            </div>
+                            <p className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap leading-relaxed font-medium">{report.content}</p>
+                            <div className="mt-4 pt-4 border-t border-gray-50 dark:border-gray-700 flex items-center justify-end">
+                                <div className="flex items-center text-xs font-bold text-gray-400">
+                                    <User size={12} className="mr-1.5" />
+                                    {report.profiles?.name || '익명'}
+                                </div>
+                            </div>
+                        </div>
+                    </motion.div>
+                );
+            })}
+        </div>
+    );
+}
 
 export default function HistoryPage() {
     const { profile } = useAuth();
-    const [selectedClient, setSelectedClient] = useState<{ id: string, name: string } | null>(null);
-    const [reports, setReports] = useState<any[]>([]);
+    const [selectedClient, setSelectedClient] = useState<{ id: string; name: string } | null>(null);
+    const [reports, setReports] = useState<HistoryReport[]>([]);
     const [loading, setLoading] = useState(false);
-    const [todayReports, setTodayReports] = useState<any[]>([]);
-    const [managers, setManagers] = useState<any[]>([]);
+    const [todayReports, setTodayReports] = useState<HistoryReport[]>([]);
+    const [managers, setManagers] = useState<Manager[]>([]);
     const [selectedManager, setSelectedManager] = useState<string>('all');
 
     useEffect(() => {
-        if (profile?.role === 'leader') {
-            loadManagers();
-        }
+        if (profile?.role !== 'leader') return;
+        supabase
+            .from('profiles')
+            .select('id, name')
+            .order('name')
+            .then(({ data }) => setManagers(data ?? []));
     }, [profile]);
 
     useEffect(() => {
-        if (selectedClient) {
-            loadHistory(selectedClient.id);
-        } else {
-            loadTodayHistory();
-        }
+        let active = true;
+        const load = async () => {
+            setLoading(true);
+            let query = selectedClient
+                ? supabase.from('reports').select('*, profiles(name)').eq('client_id', selectedClient.id)
+                : supabase.from('reports').select('*, profiles(name), clients(name)').gte('activity_at', (() => {
+                    const today = new Date();
+                    today.setHours(0, 0, 0, 0);
+                    return today.toISOString();
+                })());
+            if (selectedManager !== 'all') query = query.eq('user_id', selectedManager);
+            const { data } = await query.order('activity_at', { ascending: false });
+            if (!active) return;
+            if (selectedClient) setReports((data ?? []) as unknown as HistoryReport[]);
+            else setTodayReports((data ?? []) as unknown as HistoryReport[]);
+            setLoading(false);
+        };
+        load();
+        return () => {
+            active = false;
+        };
     }, [selectedClient, selectedManager]);
-
-    const loadManagers = async () => {
-        const { data } = await supabase
-            .from('profiles')
-            .select('*')
-            .order('name');
-        setManagers(data || []);
-    };
-
-    const loadTodayHistory = async () => {
-        setLoading(true);
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-
-        let query = supabase
-            .from('reports')
-            .select('*, profiles(name), clients(name)')
-            .gte('created_at', today.toISOString())
-            .order('created_at', { ascending: false });
-
-        if (selectedManager !== 'all') {
-            query = query.eq('user_id', selectedManager);
-        }
-
-        const { data } = await query;
-        setTodayReports(data || []);
-        setLoading(false);
-    };
-
-    const loadHistory = async (clientId: string) => {
-        setLoading(true);
-        let query = supabase
-            .from('reports')
-            .select('*, profiles(name)')
-            .eq('client_id', clientId)
-            .order('created_at', { ascending: false });
-
-        if (selectedManager !== 'all') {
-            query = query.eq('user_id', selectedManager);
-        }
-
-        const { data } = await query;
-        setReports(data || []);
-        setLoading(false);
-    };
-
-    const getIcon = (type: string) => {
-        switch (type) {
-            case 'visit': return MapPin;
-            case 'phone': return Phone;
-            case 'email': return Mail;
-            case 'offline_meeting': return Users;
-            case 'video_meeting': return Video;
-            default: return Clock;
-        }
-    };
-
-    const getColor = (type: string) => {
-        switch (type) {
-            case 'visit': return 'bg-blue-500 shadow-blue-200';
-            case 'phone': return 'bg-green-500 shadow-green-200';
-            case 'email': return 'bg-purple-500 shadow-purple-200';
-            case 'offline_meeting': return 'bg-orange-500 shadow-orange-200';
-            case 'video_meeting': return 'bg-teal-500 shadow-teal-200';
-            default: return 'bg-gray-500 shadow-gray-200';
-        }
-    };
 
     return (
         <div className="space-y-8 pb-20 animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -112,7 +124,7 @@ export default function HistoryPage() {
                     <Check size={12} className="text-primary" />
                     <span>필터링</span>
                 </div>
-                <ClientSearch onSelect={setSelectedClient} />
+                <ClientSearch onSelect={setSelectedClient} onClear={() => setSelectedClient(null)} />
 
                 {profile?.role === 'leader' && (
                     <div className="relative group">
@@ -139,55 +151,10 @@ export default function HistoryPage() {
                 <div className="space-y-8 px-2">
                     <div className="flex items-center justify-between">
                         <h2 className="text-xl font-black text-gray-800 dark:text-gray-100">{selectedClient.name} 타임라인</h2>
-                        <span className="text-xs font-bold text-primary bg-primary/10 px-3 py-1.5 rounded-full">{reports.length} Activities</span>
+                        <span className="text-xs font-bold text-primary bg-primary/10 px-3 py-1.5 rounded-full">{reports.length}건</span>
                     </div>
-
                     {reports.length > 0 ? (
-                        <div className="relative pl-8 space-y-10 before:content-[''] before:absolute before:left-[15px] before:top-4 before:bottom-0 before:w-0.5 before:bg-gray-200 dark:before:bg-gray-700">
-                            {reports.map((report, idx) => {
-                                const Icon = getIcon(report.type);
-                                return (
-                                    <motion.div
-                                        initial={{ opacity: 0, x: -20 }}
-                                        animate={{ opacity: 1, x: 0 }}
-                                        transition={{ delay: idx * 0.05 }}
-                                        key={report.id}
-                                        className="relative"
-                                    >
-                                        <div className={cn(
-                                            "absolute -left-[43px] top-0 w-8 h-8 rounded-full flex items-center justify-center text-white border-[3px] border-white dark:border-gray-900 shadow-lg z-10",
-                                            getColor(report.type)
-                                        )}>
-                                            <Icon size={14} />
-                                        </div>
-                                        <div className="bg-white dark:bg-gray-800 p-6 rounded-[1.5rem] shadow-sm border border-gray-100 dark:border-gray-700 card-premium hover:scale-[1.01] transition-transform">
-                                            <div className="flex justify-between items-start mb-3">
-                                                <span className={cn(
-                                                    "text-xs font-bold uppercase tracking-wider px-2 py-0.5 rounded-md",
-                                                    report.type === 'visit' ? "bg-blue-50 text-blue-500" :
-                                                        report.type === 'phone' ? "bg-green-50 text-green-500" :
-                                                            report.type === 'offline_meeting' ? "bg-orange-50 text-orange-500" :
-                                                                report.type === 'video_meeting' ? "bg-teal-50 text-teal-500" :
-                                                                    "bg-purple-50 text-purple-500"
-                                                )}>
-                                                    {report.type === 'visit' ? '방문' : report.type === 'phone' ? '전화' : report.type === 'offline_meeting' ? '오프라인 미팅' : report.type === 'video_meeting' ? '화상미팅' : '메일'}
-                                                </span>
-                                                <span className="text-xs font-bold text-gray-400">
-                                                    {format(new Date(report.created_at), 'yyyy.MM.dd HH:mm', { locale: ko })}
-                                                </span>
-                                            </div>
-                                            <p className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap leading-relaxed font-medium">{report.content}</p>
-                                            <div className="mt-4 pt-4 border-t border-gray-50 dark:border-gray-700 flex items-center justify-end">
-                                                <div className="flex items-center text-xs font-bold text-gray-400">
-                                                    <User size={12} className="mr-1.5" />
-                                                    {report.profiles?.name || '익명'}
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </motion.div>
-                                );
-                            })}
-                        </div>
+                        <Timeline reports={reports} showClient={false} dateFormat="yyyy.MM.dd HH:mm" />
                     ) : (
                         <div className="text-center py-20 text-gray-400">활동 내역이 없습니다.</div>
                     )}
@@ -196,60 +163,10 @@ export default function HistoryPage() {
                 <div className="space-y-8 px-2">
                     <div className="flex items-center justify-between">
                         <h2 className="text-xl font-black text-gray-800 dark:text-gray-100">오늘의 전체 활동</h2>
-                        <span className="text-xs font-bold text-primary bg-primary/10 px-3 py-1.5 rounded-full">{todayReports.length} Activities</span>
+                        <span className="text-xs font-bold text-primary bg-primary/10 px-3 py-1.5 rounded-full">{todayReports.length}건</span>
                     </div>
-
                     {todayReports.length > 0 ? (
-                        <div className="relative pl-8 space-y-10 before:content-[''] before:absolute before:left-[15px] before:top-4 before:bottom-0 before:w-0.5 before:bg-gray-200 dark:before:bg-gray-700">
-                            {todayReports.map((report, idx) => {
-                                const Icon = getIcon(report.type);
-                                return (
-                                    <motion.div
-                                        initial={{ opacity: 0, x: -20 }}
-                                        animate={{ opacity: 1, x: 0 }}
-                                        transition={{ delay: idx * 0.05 }}
-                                        key={report.id}
-                                        className="relative"
-                                    >
-                                        <div className={cn(
-                                            "absolute -left-[43px] top-0 w-8 h-8 rounded-full flex items-center justify-center text-white border-[3px] border-white dark:border-gray-900 shadow-lg z-10",
-                                            getColor(report.type)
-                                        )}>
-                                            <Icon size={14} />
-                                        </div>
-                                        <div className="bg-white dark:bg-gray-800 p-6 rounded-[1.5rem] shadow-sm border border-gray-100 dark:border-gray-700 card-premium hover:scale-[1.01] transition-transform">
-                                            <div className="flex justify-between items-start mb-3">
-                                                <div className="flex flex-col">
-                                                    <span className="text-sm font-bold text-gray-800 dark:text-gray-100 mb-1">
-                                                        {report.clients?.name}
-                                                    </span>
-                                                    <span className={cn(
-                                                        "text-[10px] font-bold uppercase tracking-wider w-fit px-2 py-0.5 rounded-md",
-                                                        report.type === 'visit' ? "bg-blue-50 text-blue-500" :
-                                                            report.type === 'phone' ? "bg-green-50 text-green-500" :
-                                                                report.type === 'offline_meeting' ? "bg-orange-50 text-orange-500" :
-                                                                    report.type === 'video_meeting' ? "bg-teal-50 text-teal-500" :
-                                                                        "bg-purple-50 text-purple-500"
-                                                    )}>
-                                                        {report.type === 'visit' ? '방문' : report.type === 'phone' ? '전화' : report.type === 'offline_meeting' ? '오프라인 미팅' : report.type === 'video_meeting' ? '화상미팅' : '메일'}
-                                                    </span>
-                                                </div>
-                                                <span className="text-xs font-bold text-gray-400">
-                                                    {format(new Date(report.created_at), 'HH:mm', { locale: ko })}
-                                                </span>
-                                            </div>
-                                            <p className="text-sm text-gray-700 dark:text-gray-300 whitespace-pre-wrap leading-relaxed font-medium">{report.content}</p>
-                                            <div className="mt-4 pt-4 border-t border-gray-50 dark:border-gray-700 flex items-center justify-end">
-                                                <div className="flex items-center text-xs font-bold text-gray-400">
-                                                    <User size={12} className="mr-1.5" />
-                                                    {report.profiles?.name || '익명'}
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </motion.div>
-                                );
-                            })}
-                        </div>
+                        <Timeline reports={todayReports} showClient dateFormat="HH:mm" />
                     ) : (
                         <div className="text-center py-24 text-gray-400 bg-gray-50 dark:bg-gray-800/50 rounded-[2rem] border-2 border-dashed border-gray-200 dark:border-gray-700">
                             <Clock size={48} className="mx-auto mb-4 opacity-20" />
