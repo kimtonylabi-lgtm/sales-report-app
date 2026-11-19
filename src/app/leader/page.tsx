@@ -41,14 +41,16 @@ export default function LeaderDashboard() {
             .from('reports')
             .select('*', { count: 'exact', head: true });
 
-        // 3. Get dormant clients (14 days)
+        // 3. Get dormant clients (touched before, but not in the last 14 days).
+        // Never-touched clients are excluded: hundreds were pre-registered from the order index
+        // and would flood the list before anyone has contacted them.
         const fourteenDaysAgo = new Date();
         fourteenDaysAgo.setDate(fourteenDaysAgo.getDate() - 14);
 
         const { data: clients } = await supabase
             .from('clients')
             .select('*')
-            .or(`last_visited_at.lt.${fourteenDaysAgo.toISOString()},last_visited_at.is.null`)
+            .lt('last_visited_at', fourteenDaysAgo.toISOString())
             .order('last_visited_at', { ascending: true });
 
         // 4. Get Weekly Stats (Last 7 days)

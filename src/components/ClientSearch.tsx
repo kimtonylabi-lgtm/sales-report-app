@@ -3,7 +3,10 @@
 import { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import { Search, Plus, Loader2 } from 'lucide-react';
-import { cn } from '@/lib/utils';
+/** Display name: drop legal-form words ((주), ㈜, 주식회사, (유)) and extra spaces. */
+const cleanName = (s: string) => s.replace(/\(주\)|㈜|주식회사|\(유\)/g, '').replace(/\s+/g, ' ').trim();
+/** Must match the DB generated column clients.name_key (supabase_clients_cleanup_2026-11.sql). */
+const nameKey = (s: string) => s.replace(/\(주\)|㈜|주식회사|\(유\)/g, '').replace(/[\s\-_.·,]/g, '').toLowerCase();
 
 export function ClientSearch({ onSelect }: { onSelect: (client: { id: string, name: string }) => void }) {
     const [query, setQuery] = useState('');
@@ -49,26 +52,35 @@ export function ClientSearch({ onSelect }: { onSelect: (client: { id: string, na
         setIsFocused(false);
     };
 
+    const newName = cleanName(query);
+    // At least 2 characters, so a stray keystroke cannot register a client like "군".
+    const canCreate = nameKey(newName).length >= 2 && !results.some((r) => nameKey(r.name) === nameKey(newName));
+
     const handleCreate = async () => {
-        if (!query) return;
+        if (!canCreate) return;
         setIsCreating(true);
         try {
             const { data, error } = await supabase
                 .from('clients')
-                .insert([{ name: query }])
-                .select()
+                .insert([{ name: newName }])
+                .select('id, name')
                 .single();
 
             if (data) {
                 handleSelect(data);
-            } else if (error && error.code === '23505') { // Unique violation
-                // If it exists, find it
+            } else if (error?.code === '23505') {
+                // Same company already exists under another spelling, e.g. "(주)코스맥스" vs "코스맥스" — select it.
                 const { data: existing } = await supabase
                     .from('clients')
                     .select('id, name')
-                    .eq('name', query)
+                    .eq('name_key', nameKey(newName))
                     .single();
-                if (existing) handleSelect(existing);
+                if (existing) {
+                    handleSelect(existing);
+                    alert(`이미 등록된 "${existing.name}"을(를) 선택했습니다.`);
+                }
+            } else if (error) {
+                alert('고객사 등록 실패: ' + error.message);
             }
         } finally {
             setIsCreating(false);
@@ -111,7 +123,7 @@ export function ClientSearch({ onSelect }: { onSelect: (client: { id: string, na
                         </div>
                     )}
 
-                    {!results.find(r => r.name === query) && (
+                    {canCreate && (
                         <button
                             onClick={handleCreate}
                             disabled={isCreating}
@@ -122,7 +134,7 @@ export function ClientSearch({ onSelect }: { onSelect: (client: { id: string, na
                             ) : (
                                 <Plus size={18} className="mr-2" />
                             )}
-                            "{query}" 신규 등록하기
+                            "{newName}" 신규 등록하기
                         </button>
                     )}
                 </div>
