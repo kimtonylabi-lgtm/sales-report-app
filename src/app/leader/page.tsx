@@ -3,11 +3,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { format, subDays, startOfDay, startOfMonth, subMonths, differenceInDays } from 'date-fns';
-import { ko } from 'date-fns/locale';
-import { AlertCircle, TrendingUp, Users, Calendar, Download, Lock, BarChart3, ChevronDown } from 'lucide-react';
+import { AlertCircle, TrendingUp, Users, Calendar, Download, Lock, ChevronDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/components/AuthProvider';
-import { buildReportWorkbook, type ExportRow } from '@/lib/export-reports';
+import { buildReportWorkbook, type ClientKind, type ExportRow } from '@/lib/export-reports';
 
 /** Dormant thresholds offered to the leader (days since the last touch). */
 const DORMANT_DAYS = [30, 60, 90] as const;
@@ -22,10 +21,11 @@ const EXPORT_PERIODS = [
     { id: 'all', label: '전체', range: () => [null, null] as const },
 ] as const;
 
-/** One row of the client_touch_summary view (supabase_features_2026-11.sql). */
+/** One row of the client_touch_summary view (supabase_client_kinds_2026-11.sql). */
 type TouchSummary = {
     client_id: string;
     name: string;
+    kind: ClientKind;
     last_visited_at: string;
     report_count: number;
     last_user_id: string | null;
@@ -38,7 +38,6 @@ export default function LeaderDashboard() {
     const [stats, setStats] = useState({ today: 0, total: 0 });
     const [summary, setSummary] = useState<TouchSummary[]>([]);
     const [managers, setManagers] = useState<Manager[]>([]);
-    const [weeklyStats, setWeeklyStats] = useState<{ date: string; count: number; label: string }[]>([]);
     const [loading, setLoading] = useState(true);
     const [dormantDays, setDormantDays] = useState<(typeof DORMANT_DAYS)[number]>(30);
     const [owner, setOwner] = useState<string>('all');
@@ -51,27 +50,17 @@ export default function LeaderDashboard() {
     const loadDashboard = useCallback(async () => {
         setLoading(true);
         const today = startOfDay(new Date());
-        const weekStart = subDays(today, 6);
 
-        const [todayRes, totalRes, summaryRes, weekRes, managersRes] = await Promise.all([
+        const [todayRes, totalRes, summaryRes, managersRes] = await Promise.all([
             supabase.from('reports').select('*', { count: 'exact', head: true }).gte('created_at', today.toISOString()),
             supabase.from('reports').select('*', { count: 'exact', head: true }),
             supabase.from('client_touch_summary').select('*'),
-            supabase.from('reports').select('activity_at').gte('activity_at', weekStart.toISOString()),
             supabase.from('profiles').select('id, name').order('name'),
         ]);
-
-        const dayStats = Array.from({ length: 7 }).map((_, i) => {
-            const date = subDays(today, 6 - i);
-            const dateStr = format(date, 'yyyy-MM-dd');
-            const count = (weekRes.data ?? []).filter((r) => format(new Date(r.activity_at), 'yyyy-MM-dd') === dateStr).length;
-            return { date: dateStr, count, label: format(date, 'E', { locale: ko }) };
-        });
 
         setStats({ today: todayRes.count ?? 0, total: totalRes.count ?? 0 });
         setSummary((summaryRes.data ?? []) as TouchSummary[]);
         setManagers(managersRes.data ?? []);
-        setWeeklyStats(dayStats);
         setLoading(false);
     }, []);
 
@@ -92,6 +81,7 @@ export default function LeaderDashboard() {
     const dormant = useMemo(() => {
         const cutoff = subDays(new Date(), dormantDays).getTime();
         return summary
+            .filter((s) => s.kind === 'customer') // plants, HQ and vendors are not accounts to win back
             .filter((s) => new Date(s.last_visited_at).getTime() < cutoff)
             .filter((s) => owner === 'all' || s.last_user_id === owner)
             .sort((a, b) => b.report_count - a.report_count || a.last_visited_at.localeCompare(b.last_visited_at));
@@ -104,7 +94,7 @@ export default function LeaderDashboard() {
             const [from, to] = period.range();
             let query = supabase
                 .from('reports')
-                .select('activity_at, type, content, clients (name), profiles (name)')
+                .select('activity_at, type, content, clients (name, kind), profiles (name)')
                 .order('activity_at', { ascending: false });
             if (from) query = query.gte('activity_at', from.toISOString());
             if (to) query = query.lt('activity_at', to.toISOString());
@@ -116,13 +106,17 @@ export default function LeaderDashboard() {
                 return;
             }
 
-            const rows: ExportRow[] = reports.map((r) => ({
-                activity_at: r.activity_at,
-                type: r.type,
-                content: r.content,
-                author: (r.profiles as unknown as { name: string } | null)?.name || '알수없음',
-                client: (r.clients as unknown as { name: string } | null)?.name || '알수없음',
-            }));
+            const rows: ExportRow[] = reports.map((r) => {
+                const client = r.clients as unknown as { name: string; kind: ClientKind } | null;
+                return {
+                    activity_at: r.activity_at,
+                    type: r.type,
+                    content: r.content,
+                    author: (r.profiles as unknown as { name: string } | null)?.name || '알수없음',
+                    client: client?.name || '알수없음',
+                    kind: client?.kind ?? 'customer',
+                };
+            });
             const blob = await buildReportWorkbook(rows, period.label);
             const url = URL.createObjectURL(blob);
             const link = document.createElement('a');
@@ -164,8 +158,6 @@ export default function LeaderDashboard() {
             </div>
         );
     }
-
-    const maxCount = Math.max(...weeklyStats.map((s) => s.count), 5); // Minimum scale of 5
 
     return (
         <div className="space-y-8">
@@ -225,31 +217,6 @@ export default function LeaderDashboard() {
                         >
                             {p.label}
                         </button>
-                    ))}
-                </div>
-            </section>
-
-            {/* Weekly Chart */}
-            <section className="bg-white dark:bg-gray-800 p-6 rounded-3xl shadow-sm border border-gray-100 dark:border-gray-700">
-                <div className="flex items-center mb-6">
-                    <BarChart3 size={20} className="mr-2 text-primary" />
-                    <h2 className="text-lg font-bold">주간 활동 추이</h2>
-                </div>
-                <div className="flex items-end justify-between h-40 space-x-3">
-                    {weeklyStats.map((stat) => (
-                        <div key={stat.date} className="flex flex-col items-center flex-1 group">
-                            <div className="relative w-full flex items-end justify-center h-32 bg-gray-50 dark:bg-gray-900 rounded-t-xl overflow-hidden">
-                                <div
-                                    className="w-full bg-primary/80 group-hover:bg-primary transition-all duration-500 rounded-t-lg mx-1"
-                                    style={{ height: `${(stat.count / maxCount) * 100}%` }}
-                                >
-                                    <div className="opacity-0 group-hover:opacity-100 absolute -top-8 left-1/2 -translate-x-1/2 bg-gray-900 text-white text-[10px] px-2 py-1 rounded transition-opacity whitespace-nowrap z-10">
-                                        {stat.count}건
-                                    </div>
-                                </div>
-                            </div>
-                            <div className="text-[10px] text-gray-400 mt-2 font-medium">{stat.label}</div>
-                        </div>
                     ))}
                 </div>
             </section>
