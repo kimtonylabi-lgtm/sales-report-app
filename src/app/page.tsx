@@ -219,14 +219,14 @@ export default function Home() {
                   key={t.id}
                   onClick={() => setReportType(t.id)}
                   className={cn(
-                    "relative flex flex-col items-center justify-center p-4 rounded-2xl transition-all active:scale-95 duration-300",
+                    "relative flex flex-col items-center justify-start px-2 py-4 rounded-2xl transition-all active:scale-95 duration-300",
                     isSelected
                       ? `${t.solid} shadow-lg scale-[1.02] ring-2 ring-offset-2 ring-primary/20`
                       : "bg-gray-50 dark:bg-gray-700/50 text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700"
                   )}
                 >
                   <Icon size={24} className={cn("mb-2 transition-transform", isSelected && "scale-110")} />
-                  <span className="font-bold text-sm">{t.label}</span>
+                  <span className="font-bold text-sm text-center leading-tight break-keep">{t.label}</span>
                 </button>
               );
             })}

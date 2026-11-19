@@ -271,14 +271,14 @@ export default function MyReportsPage() {
                                                     key={t.id}
                                                     onClick={() => setEditingReport({ ...editingReport, type: t.id })}
                                                     className={cn(
-                                                        'flex flex-col items-center justify-center p-4 rounded-2xl transition-all border-2',
+                                                        'flex flex-col items-center justify-start px-2 py-4 rounded-2xl transition-all border-2',
                                                         isSelected
                                                             ? 'border-primary bg-primary/5 text-primary shadow-sm'
                                                             : 'border-transparent bg-gray-50 dark:bg-gray-800 text-gray-400'
                                                     )}
                                                 >
                                                     <Icon size={20} className={cn('mb-1 transition-transform', isSelected && 'scale-110')} />
-                                                    <span className="text-xs font-bold">{t.label}</span>
+                                                    <span className="text-xs font-bold text-center leading-tight break-keep">{t.label}</span>
                                                 </button>
                                             );
                                         })}
