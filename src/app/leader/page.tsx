@@ -73,7 +73,7 @@ export default function LeaderDashboard() {
             supabase.from('reports').select('*', { count: 'exact', head: true }),
             supabase.from('client_touch_summary').select('*'),
             supabase.from('profiles').select('id, name, role').eq('is_active', true).order('name'),
-            // last 30 days of who-reported-when: today's counts + who is a regular reporter
+            // last 30 days of who-reported-when (today's counts are taken from it)
             supabase.from('reports').select('user_id, created_at').gte('created_at', subDays(today, 30).toISOString()),
         ]);
 
@@ -82,13 +82,10 @@ export default function LeaderDashboard() {
         for (const r of recent) {
             if (new Date(r.created_at) >= today) todayCount.set(r.user_id, (todayCount.get(r.user_id) ?? 0) + 1);
         }
-        const reporters = new Set(recent.map((r) => r.user_id));
         const staff = (managersRes.data ?? []) as Manager[];
-        // Everyone in sales, plus leaders who actually file reports — so a leader who never reports
-        // does not show up as a red 0 every day.
+        // Every active account, leaders included.
         setTodayStatus(
             staff
-                .filter((m) => m.role === 'sales' || reporters.has(m.id))
                 .map((m) => ({ id: m.id, name: m.name, count: todayCount.get(m.id) ?? 0 }))
                 .sort((a, b) => a.count - b.count || a.name.localeCompare(b.name, 'ko'))
         );
